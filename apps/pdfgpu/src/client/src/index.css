@@ -1,0 +1,122 @@
+html,
+body,
+#root {
+  height: 100%;
+  margin: 0;
+}
+
+body {
+  font-family: 'Inter', 'Noto Sans KR', sans-serif;
+  background: #f4f6f8;
+  color: #111827;
+  overflow: hidden;
+}
+
+main {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+  height: 100dvh;
+  min-height: 100%;
+  padding: 6px;
+  box-sizing: border-box;
+}
+
+.viewer-toolbar {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  flex-wrap: wrap;
+  min-height: 32px;
+  padding-left: 156px;
+  box-sizing: border-box;
+}
+
+.viewer-toolbar button,
+.viewer-toolbar label {
+  display: inline-flex;
+  align-items: center;
+  gap: 5px;
+  min-height: 26px;
+  border: 1px solid #b8c2cc;
+  border-radius: 4px;
+  padding: 3px 7px;
+  background: #fff;
+  color: #1f2937;
+  font-size: 12px;
+  font-weight: 500;
+  cursor: pointer;
+}
+
+input[type='file'] {
+  max-width: 148px;
+  font-size: 11px;
+}
+
+select {
+  min-width: 116px;
+  border: 1px solid #aab4c0;
+  border-radius: 4px;
+  padding: 3px 5px;
+  background: #fff;
+  color: #111827;
+  font-size: 12px;
+}
+
+.range-control input[type='range'] {
+  width: 104px;
+  accent-color: #2563eb;
+}
+
+.range-control output {
+  min-width: 24px;
+  text-align: right;
+  font-variant-numeric: tabular-nums;
+}
+
+.loading-chip {
+  position: fixed;
+  top: 4px;
+  left: 4px;
+  z-index: 20;
+  display: flex;
+  flex-direction: column;
+  gap: 1px;
+  max-width: 148px;
+  max-height: 106px;
+  overflow: hidden;
+  border: 1px solid rgba(17, 24, 39, 0.2);
+  border-radius: 4px;
+  padding: 3px 4px;
+  background: rgba(255, 255, 255, 0.86);
+  color: #111827;
+  font-size: 11px;
+  line-height: 1.15;
+  pointer-events: none;
+}
+
+[role='region'][aria-label='PDF viewer'] {
+  flex: 1 1 auto;
+  min-height: 0;
+  overflow: auto;
+  border: 1px solid #c2cad3;
+  background: #e8edf2;
+  border-radius: 4px;
+  position: relative;
+  box-sizing: border-box;
+  padding: 6px 0;
+}
+
+[role='alert'] {
+  position: fixed;
+  top: 118px;
+  left: 4px;
+  z-index: 21;
+  max-width: 320px;
+  border: 1px solid #fca5a5;
+  border-radius: 4px;
+  padding: 4px 6px;
+  background: #fff1f2;
+  color: #7f1d1d;
+  font-size: 12px;
+}

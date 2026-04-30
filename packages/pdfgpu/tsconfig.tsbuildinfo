@@ -1,0 +1,1 @@
+{"root":["./src/index.ts","./src/types.ts","./src/engine/pdfiumEngine.ts","./src/layout/layout.ts","./src/providers/remote.ts","./src/render/renderer.ts","./src/render/textureCache.ts","./src/scheduler/byteBudgetCache.ts","./src/scheduler/queue.ts","./src/types/embedpdf-pdfium.d.ts","./src/viewer/controller.ts"],"version":"5.9.3"}

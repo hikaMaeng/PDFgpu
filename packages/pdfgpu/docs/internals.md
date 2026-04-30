@@ -1,0 +1,42 @@
+# 내부 동작
+
+## DPI 버킷
+
+`normalizeDetailDpi(rawDpi)`:
+- `round(rawDpi / 48) * 48`로 반올림
+- `144~384` 구간으로 clamp
+- preview는 항상 `96` 유지
+
+## 캐시
+
+- 키는 `kind/pageIndex/dpiBucket/tileX/tileY`
+- 엔트리 바이트 산정: `width * height * 4`
+- 기본 한도: `192 * 1024 * 1024` bytes
+- `keepKeys`가 지정되면 해당 키는 `prune`에서 보호
+
+## 큐
+
+- 스크롤/줌은 입력 debounce 없이 다음 animation frame에서 즉시 viewport/window를 갱신합니다.
+- 페이지 shell은 manifest의 페이지 크기로 먼저 배치됩니다. 이미지가 없으면 흰 placeholder로 남고, preview/detail이 도착하면 shell 배경이 투명해져 canvas 합성이 보입니다.
+- 가시성/활성 기준 priority를 계산해 전역 pending map에 등록합니다.
+- 큐 후보는 active page, visible pages, active 기준 ±2 preview, visible detail로 제한합니다. 전체 페이지를 순회하며 원거리 preview를 등록하지 않습니다.
+- background loader는 `queueDepth` 슬롯만큼만 공급자 IO를 실행합니다.
+- in-memory PDFium 공급자는 현재 브라우저 main thread WASM 경로이므로 viewer가 동시 실행을 1개로 제한합니다. 원격 Web API/WebSocket 공급자는 최대 3개까지 병렬 요청을 유지할 수 있습니다.
+- 고속 스크롤/휠 입력 중에는 새 raster 작업을 시작하지 않습니다. 이미 가진 cache/placeholder만 움직이고, 입력이 약 140ms 동안 잠잠해지면 background loader가 다시 시작됩니다.
+- 새 스크롤/페이지 점프가 들어오면 pending map의 우선순위만 재정렬됩니다. 이미 진행 중인 작업은 완료 후 현재 visible 여부를 재평가해 화면에 합성하거나 cache에만 남깁니다.
+- pending map은 최대 96개 task만 유지합니다. 대규모 PDF에서 원거리 preview/detail이 무한히 쌓이지 않게 하기 위한 상한입니다.
+- 문서 교체처럼 문서 세대가 바뀌는 경우에만 토큰을 증가시켜 이전 작업을 abort합니다.
+- viewport window 계산은 페이지 배열 선형 스캔이 아니라 binary search를 사용합니다.
+- frame 합성은 cache 전체를 visible page마다 반복 스캔하지 않고, 한 번만 visible detail 항목을 page별로 그룹화합니다.
+
+## PDFium in-memory 공급자
+
+- 문서 open 시 manifest(page count, page size, rotation)는 첫 PDFium document에서 한 번만 추출합니다.
+- 렌더 worker용 추가 document들은 같은 manifest를 공유합니다. 500페이지급 문서에서 worker 수만큼 모든 페이지를 다시 여는 일을 피합니다.
+
+## 원격 공급자 프로토콜
+
+- HTTP 공급자는 PDF bytes를 base64 JSON으로 업로드하고 `documentId`를 받습니다.
+- preview/detail 요청은 `documentId`와 페이지/DPI/타일 좌표를 전달합니다.
+- WebSocket 공급자는 같은 payload를 `{ id, method, payload }` JSON RPC로 보냅니다.
+- 원격 이미지는 base64 인코딩된 이미지와 `contentType`을 반환하며, 클라이언트는 `HTMLImageElement`로 디코드합니다.

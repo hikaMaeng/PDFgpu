@@ -1,0 +1,27 @@
+services:
+  pdfgpu:
+    image: hika00/pdfgpu:latest
+    build:
+      context: .
+      dockerfile: ./apps/pdfgpu/docker/Dockerfile
+    ports:
+      - "51000:51000"
+    restart: unless-stopped
+    healthcheck:
+      test: ["CMD","node","-e","require('http').get('http://127.0.0.1:51000/health', res=>process.exit(res.statusCode===200?0:1)).on('error', ()=>process.exit(1));"]
+      interval: 10s
+      timeout: 5s
+      retries: 3
+
+  e2e:
+    image: mcr.microsoft.com/playwright:latest
+    working_dir: /work
+    volumes:
+      - ./:/work
+    depends_on:
+      - pdfgpu
+    environment:
+      TEST_URL: http://pdfgpu:51000
+    entrypoint: ["/bin/sh", "-c"]
+    command: "sh ./tests/e2e/run-e2e.sh"
+    
