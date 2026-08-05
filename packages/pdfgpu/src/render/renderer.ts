@@ -1,4 +1,4 @@
-import type { PdfImageSource } from '../types';
+import type { PdfImageSource } from '../types.js';
 
 type GpuTextureEntry = {
   source: PdfImageSource;

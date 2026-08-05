@@ -1,9 +1,9 @@
-import { buildLayout, resolveViewportWindow, visiblePageIndices } from '../layout/layout';
-import { RasterCache, cacheKey } from '../scheduler/byteBudgetCache';
-import { PageRenderer } from '../render/renderer';
-import { buildRenderQueue } from '../scheduler/queue';
-import { normalizeDetailDpi } from '../engine/dpi';
-import { createViewerInteractionState, normalizeViewerPage, reduceViewerInteraction, viewerModeFromParts, } from './interaction';
+import { buildLayout, resolveViewportWindow, visiblePageIndices } from '../layout/layout.js';
+import { RasterCache, cacheKey } from '../scheduler/byteBudgetCache.js';
+import { PageRenderer } from '../render/renderer.js';
+import { buildRenderQueue } from '../scheduler/queue.js';
+import { normalizeDetailDpi } from '../engine/dpi.js';
+import { createViewerInteractionState, normalizeViewerPage, reduceViewerInteraction, viewerModeFromParts, } from './interaction.js';
 const DEFAULT_MIN_ZOOM = 0.25;
 const DEFAULT_MAX_ZOOM = 8;
 const DEFAULT_PAGE_GAP = 16;

@@ -1,4 +1,4 @@
-import type { LayoutMetrics, PositionedPage } from '../layout/layout';
+import type { LayoutMetrics, PositionedPage } from '../layout/layout.js';
 
 export interface QueueRenderTask {
   key: string;

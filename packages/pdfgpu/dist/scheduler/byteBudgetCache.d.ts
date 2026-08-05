@@ -1,4 +1,4 @@
-import type { PdfImageSource } from '../types';
+import type { PdfImageSource } from '../types.js';
 type RenderKind = 'preview' | 'detail';
 export interface CachedRaster {
     key: string;

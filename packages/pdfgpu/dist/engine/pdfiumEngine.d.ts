@@ -1,4 +1,4 @@
-import type { PdfDocumentEngine } from '../types';
+import type { PdfDocumentEngine } from '../types.js';
 export interface PdfDocumentEngineCreateOptions {
     poolSize?: number;
 }

@@ -1,5 +1,5 @@
 import pdfiumWasmUrl from '@embedpdf/pdfium/pdfium.wasm?url';
-import { normalizeDetailDpi } from './dpi';
+import { normalizeDetailDpi } from './dpi.js';
 const PREVIEW_DPI = 96;
 const TILE_SIZE = 512;
 const RENDER_FLAGS = 16;

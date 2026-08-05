@@ -5,7 +5,7 @@ import type {
   PdfRasterProvider,
   PdfRasterResult,
   PdfTileRenderRequest
-} from '../types';
+} from '../types.js';
 
 type RemoteOpenResponse = {
   documentId: string;

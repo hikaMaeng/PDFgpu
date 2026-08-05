@@ -1,7 +1,7 @@
-import { buildLayout, resolveViewportWindow, visiblePageIndices, type LayoutMetrics } from '../layout/layout';
-import { RasterCache, cacheKey } from '../scheduler/byteBudgetCache';
-import { PageRenderer } from '../render/renderer';
-import { buildRenderQueue, type QueueRenderTask } from '../scheduler/queue';
+import { buildLayout, resolveViewportWindow, visiblePageIndices, type LayoutMetrics } from '../layout/layout.js';
+import { RasterCache, cacheKey } from '../scheduler/byteBudgetCache.js';
+import { PageRenderer } from '../render/renderer.js';
+import { buildRenderQueue, type QueueRenderTask } from '../scheduler/queue.js';
 import {
   type PdfDocumentManifest,
   type PdfDocumentSource,
@@ -13,15 +13,15 @@ import {
   type PdfGpuViewerOptions,
   type PdfGpuViewerState,
   type PdfRasterProvider
-} from '../types';
-import { normalizeDetailDpi } from '../engine/dpi';
+} from '../types.js';
+import { normalizeDetailDpi } from '../engine/dpi.js';
 import {
   createViewerInteractionState,
   normalizeViewerPage,
   reduceViewerInteraction,
   viewerModeFromParts,
   type ViewerInteractionState,
-} from './interaction';
+} from './interaction.js';
 
 const DEFAULT_MIN_ZOOM = 0.25;
 const DEFAULT_MAX_ZOOM = 8;

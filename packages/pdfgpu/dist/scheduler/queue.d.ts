@@ -1,4 +1,4 @@
-import type { LayoutMetrics } from '../layout/layout';
+import type { LayoutMetrics } from '../layout/layout.js';
 export interface QueueRenderTask {
     key: string;
     kind: 'preview' | 'detail';

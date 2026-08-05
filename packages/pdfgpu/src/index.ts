@@ -1,11 +1,11 @@
-import { createPdfGpuViewer } from './viewer/controller';
-import { createPdfDocumentEngine } from './engine/pdfiumEngine';
-import { normalizeDetailDpi } from './engine/dpi';
+import { createPdfGpuViewer } from './viewer/controller.js';
+import { createPdfDocumentEngine } from './engine/pdfiumEngine.js';
+import { normalizeDetailDpi } from './engine/dpi.js';
 import {
   createInMemoryPdfRasterProvider,
   createWebApiPdfRasterProvider,
   createWebSocketPdfRasterProvider
-} from './providers/remote';
+} from './providers/remote.js';
 import type {
   PdfDocumentEngine,
   PdfDocumentSource,
@@ -19,9 +19,9 @@ import type {
   PdfPageManifest,
   PdfRasterProvider,
   PdfRasterProviderKind
-} from './types';
+} from './types.js';
 
-export * from './viewer/interaction';
+export * from './viewer/interaction.js';
 
 export {
   createPdfDocumentEngine,

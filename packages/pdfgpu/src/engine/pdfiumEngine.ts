@@ -7,9 +7,9 @@ import type {
   PdfPreviewRenderRequest,
   PdfRasterResult,
   PdfTileRenderRequest
-} from '../types';
+} from '../types.js';
 import pdfiumWasmUrl from '@embedpdf/pdfium/pdfium.wasm?url';
-import { normalizeDetailDpi } from './dpi';
+import { normalizeDetailDpi } from './dpi.js';
 
 type PdfiumWrapped = {
   pdfium: {

@@ -1,4 +1,4 @@
-import type { PdfImageSource } from '../types';
+import type { PdfImageSource } from '../types.js';
 
 export interface CachedEntry {
   key: string;
