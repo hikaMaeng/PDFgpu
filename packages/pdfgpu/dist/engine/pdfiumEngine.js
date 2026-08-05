@@ -1,4 +1,3 @@
-import pdfiumWasmUrl from '@embedpdf/pdfium/pdfium.wasm?url';
 import { normalizeDetailDpi } from './dpi.js';
 const PREVIEW_DPI = 96;
 const TILE_SIZE = 512;
@@ -97,9 +96,12 @@ async function ensurePdfium() {
     if (!isBrowserEnvironment()) {
         throw new Error('PDFium engine is browser-only');
     }
-    pdfiumShared = import('@embedpdf/pdfium').then(async (raw) => {
+    pdfiumShared = Promise.all([
+        import('@embedpdf/pdfium'),
+        import('@embedpdf/pdfium/pdfium.wasm?url')
+    ]).then(async ([raw, wasmAsset]) => {
         const pdfiumModule = raw;
-        const response = await fetch(pdfiumWasmUrl);
+        const response = await fetch(wasmAsset.default);
         const wasmBinary = await response.arrayBuffer();
         const wrapped = await pdfiumModule.init({ wasmBinary });
         wrapped.PDFiumExt_Init();
