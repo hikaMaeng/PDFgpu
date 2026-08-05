@@ -7,8 +7,8 @@
   런타임 로직을 소유하지 않습니다.
 - PDFit은 이 패키지를 `@pdfgpu/core`로만 import하고, 연동 시 `dist`를
   `npm pack`/`pnpm pack`한 tarball과 source commit을 manifest에 고정합니다.
-- `packages/pdfgpu/vendor/embedpdf-pdfium-2.14.0.tgz`는 코어 패키지의
-  재배포 경계를 닫는 내부 런타임 자산입니다.
+- PDFium WASM은 `@embedpdf/pdfium@2.14.0` semver dependency로 해석되며,
+  코어 package가 형제 저장소의 파일 경로를 참조하지 않게 합니다.
 
 ## 소스 라우터
 

@@ -11,8 +11,9 @@
   밖의 상대 경로 의존성을 둘 수 없습니다.
 - 소비자는 `dist` 파일을 복사하거나 `src`를 alias하지 말고 semver 버전과
   source commit이 기록된 package artifact를 사용해야 합니다.
-- PDFium WASM은 `vendor/`의 고정 tarball에서만 공급합니다. PDFium 버전을
-  변경할 때는 package 버전과 통합 manifest를 함께 갱신해야 합니다.
+- PDFium WASM은 `@embedpdf/pdfium@2.14.0`의 고정 semver dependency에서만
+  공급합니다. PDFium 버전을 변경할 때는 package 버전과 통합 manifest를
+  함께 갱신해야 합니다.
 
 ## 브라우저 테스트 마크업 계약
 

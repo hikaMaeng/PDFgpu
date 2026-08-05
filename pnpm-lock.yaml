@@ -47,8 +47,8 @@ importers:
   packages/pdfgpu:
     dependencies:
       '@embedpdf/pdfium':
-        specifier: file:vendor/embedpdf-pdfium-2.14.0.tgz
-        version: file:packages/pdfgpu/vendor/embedpdf-pdfium-2.14.0.tgz
+        specifier: 2.14.0
+        version: 2.14.0
     devDependencies:
       typescript:
         specifier: 5.9.3
@@ -139,9 +139,8 @@ packages:
     resolution: {integrity: sha512-LwdZHpScM4Qz8Xw2iKSzS+cfglZzJGvofQICy7W7v4caru4EaAmyUuO6BGrbyQ2mYV11W0U8j5mBhd14dd3B0A==}
     engines: {node: '>=6.9.0'}
 
-  '@embedpdf/pdfium@file:packages/pdfgpu/vendor/embedpdf-pdfium-2.14.0.tgz':
-    resolution: {integrity: sha512-yOg1VcIZPXASrzNmS4ZRjo78SUxf9ohey2zTSP7qOR+opMS0OenI/iXtbFGizpZFtk0gfK1Y1HQOxvDpuIiOEw==, tarball: file:packages/pdfgpu/vendor/embedpdf-pdfium-2.14.0.tgz}
-    version: 2.14.0
+  '@embedpdf/pdfium@2.14.0':
+    resolution: {integrity: sha512-yOg1VcIZPXASrzNmS4ZRjo78SUxf9ohey2zTSP7qOR+opMS0OenI/iXtbFGizpZFtk0gfK1Y1HQOxvDpuIiOEw==}
 
   '@esbuild/aix-ppc64@0.21.5':
     resolution: {integrity: sha512-1SDgH6ZSPTlggy1yI6+Dbkiz8xzpHJEVAlF/AM1tHPLsf5STom9rwtjE4hKAF20FfXXNTFqEYXyJNWh1GiZedQ==}
@@ -791,7 +790,7 @@ snapshots:
       '@babel/helper-string-parser': 7.27.1
       '@babel/helper-validator-identifier': 7.28.5
 
-  '@embedpdf/pdfium@file:packages/pdfgpu/vendor/embedpdf-pdfium-2.14.0.tgz': {}
+  '@embedpdf/pdfium@2.14.0': {}
 
   '@esbuild/aix-ppc64@0.21.5':
     optional: true
