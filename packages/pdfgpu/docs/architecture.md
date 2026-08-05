@@ -10,6 +10,19 @@
 - `packages/pdfgpu/vendor/embedpdf-pdfium-2.14.0.tgz`는 코어 패키지의
   재배포 경계를 닫는 내부 런타임 자산입니다.
 
+## 소스 라우터
+
+| Path | Contract |
+| --- | --- |
+| `src/adapter` | browser/provider adapter boundary |
+| `src/engine` | PDFium engine and DPI normalization |
+| `src/layout` | manifest-driven page positioning |
+| `src/providers` | in-memory, HTTP, and WebSocket raster providers |
+| `src/render` | WebGPU/2D frame composition |
+| `src/scheduler` | byte-budget cache and bounded render queue |
+| `src/types` | PDFium module declarations and public type support |
+| `src/viewer` | controller and framework-independent interaction reducer |
+
 ## 1) Provider Layer (`engine/`, `providers/`)
 
 - `PdfRasterProvider`는 PDF 파싱/래스터 공급 경계를 소유합니다.
