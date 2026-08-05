@@ -7,6 +7,14 @@
 - `144~384` 구간으로 clamp
 - preview는 항상 `96` 유지
 
+## 상호작용 상태
+
+- `viewer/interaction.ts`가 mode, page, pageCount, wheel accumulation을 보유합니다.
+- `reduceViewerInteraction`은 navigation/zoom effect를 반환하고 DOM을 직접
+  변경하지 않습니다.
+- controller는 reducer 상태를 `PdfGpuViewerState`로 projection하며, React나
+  샘플 앱이 별도 페이지 계산을 복제하지 않습니다.
+
 ## 캐시
 
 - 키는 `kind/pageIndex/dpiBucket/tileX/tileY`

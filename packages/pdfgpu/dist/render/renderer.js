@@ -154,6 +154,7 @@ export class PageRenderer {
         if (!this.device || !this.context || !this.pipeline || !this.sampler)
             return;
         const encoder = this.device.createCommandEncoder();
+        const vertexBuffers = [];
         const pass = encoder.beginRenderPass({
             colorAttachments: [
                 {
@@ -174,6 +175,7 @@ export class PageRenderer {
                 size: vertices.byteLength,
                 usage: GPU_BUFFER_USAGE_VERTEX | GPU_BUFFER_USAGE_COPY_DST
             });
+            vertexBuffers.push(vertexBuffer);
             this.device.queue.writeBuffer(vertexBuffer, 0, vertices);
             const bindGroup = this.device.createBindGroup({
                 layout: this.pipeline.getBindGroupLayout(0),
@@ -188,6 +190,9 @@ export class PageRenderer {
         }
         pass.end();
         this.device.queue.submit([encoder.finish()]);
+        for (const vertexBuffer of vertexBuffers) {
+            vertexBuffer.destroy?.();
+        }
     }
     getOrCreateTexture(source) {
         if (!this.device)

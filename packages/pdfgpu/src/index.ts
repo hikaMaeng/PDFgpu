@@ -1,5 +1,6 @@
 import { createPdfGpuViewer } from './viewer/controller';
-import { createPdfDocumentEngine, normalizeDetailDpi } from './engine/pdfiumEngine';
+import { createPdfDocumentEngine } from './engine/pdfiumEngine';
+import { normalizeDetailDpi } from './engine/dpi';
 import {
   createInMemoryPdfRasterProvider,
   createWebApiPdfRasterProvider,
@@ -19,6 +20,8 @@ import type {
   PdfRasterProvider,
   PdfRasterProviderKind
 } from './types';
+
+export * from './viewer/interaction';
 
 export {
   createPdfDocumentEngine,

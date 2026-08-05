@@ -11,12 +11,17 @@
 - DPI 버킷 반올림
 - byte-budget eviction
 - 우선순위 큐 순서
+- scroll/single/double 상호작용 matrix, keyboard editable target, Ctrl+wheel zoom
 
 실행:
 
 ```bash
 pnpm --filter @pdfgpu/core test
 ```
+
+현재 core unit test는 19개입니다. Windows에서도 패키지 소유의 TypeScript
+devDependency와 `pnpm install`만으로 `dist`를 재생성할 수 있어야 하며, pack한
+tarball의 `files` 목록에는 `dist`, 문서, PDFium vendor 자산만 포함되어야 합니다.
 
 ## Playwright 브라우저 테스트
 

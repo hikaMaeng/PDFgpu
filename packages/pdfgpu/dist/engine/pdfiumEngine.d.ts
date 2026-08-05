@@ -1,5 +1,4 @@
 import type { PdfDocumentEngine } from '../types';
-export declare function normalizeDetailDpi(rawDpi: number): number;
 export interface PdfDocumentEngineCreateOptions {
     poolSize?: number;
 }

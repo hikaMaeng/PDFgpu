@@ -17,3 +17,8 @@ declare module '@embedpdf/pdfium' {
 
   export default pdfiumModule;
 }
+
+declare module '@embedpdf/pdfium/pdfium.wasm?url' {
+  const wasmUrl: string;
+  export default wasmUrl;
+}

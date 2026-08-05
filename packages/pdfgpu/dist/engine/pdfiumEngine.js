@@ -1,7 +1,6 @@
+import pdfiumWasmUrl from '@embedpdf/pdfium/pdfium.wasm?url';
+import { normalizeDetailDpi } from './dpi';
 const PREVIEW_DPI = 96;
-const TILE_DPI_MIN = 144;
-const TILE_DPI_MAX = 384;
-const TILE_DPI_STEP = 48;
 const TILE_SIZE = 512;
 const RENDER_FLAGS = 16;
 const WHITE = 0xffffffff;
@@ -44,9 +43,6 @@ function assertNotAborted(signal) {
     if (signal?.aborted) {
         throw new DOMException('render aborted', 'AbortError');
     }
-}
-export function normalizeDetailDpi(rawDpi) {
-    return clamp(Math.round(rawDpi / TILE_DPI_STEP) * TILE_DPI_STEP, TILE_DPI_MIN, TILE_DPI_MAX);
 }
 async function sourceToBytes(source) {
     if (source instanceof Uint8Array)
@@ -103,7 +99,7 @@ async function ensurePdfium() {
     }
     pdfiumShared = import('@embedpdf/pdfium').then(async (raw) => {
         const pdfiumModule = raw;
-        const response = await fetch(pdfiumModule.DEFAULT_PDFIUM_WASM_URL);
+        const response = await fetch(pdfiumWasmUrl);
         const wasmBinary = await response.arrayBuffer();
         const wrapped = await pdfiumModule.init({ wasmBinary });
         wrapped.PDFiumExt_Init();
@@ -131,7 +127,8 @@ async function createBitmapImage(pdfium, pagePtr, bitmapWidth, bitmapHeight, sta
             throw new Error('failed to read rendered buffer');
         const bytesPerPixel = 4;
         const byteCount = targetBitmapWidth * targetBitmapHeight * bytesPerPixel;
-        const sourceBytes = new Uint8ClampedArray(pdfium.pdfium.HEAPU8.buffer, pdfium.pdfium.HEAPU8.byteOffset + bufferPtr, byteCount).slice();
+        const sourceBytes = new Uint8ClampedArray(new ArrayBuffer(byteCount));
+        sourceBytes.set(pdfium.pdfium.HEAPU8.subarray(bufferPtr, bufferPtr + byteCount));
         const imageData = new ImageData(pdfiumBgraToRgba(sourceBytes), targetBitmapWidth, targetBitmapHeight);
         return await createImageBitmap(imageData);
     }

@@ -1,5 +1,15 @@
 # 아키텍처
 
+## 패키지 경계
+
+- `packages/pdfgpu/src`가 `@pdfgpu/core`의 단일 소스입니다.
+- `apps/pdfgpu`는 provider와 뷰어 계약을 실증하는 샘플 소비자이며 코어의
+  런타임 로직을 소유하지 않습니다.
+- PDFit은 이 패키지를 `@pdfgpu/core`로만 import하고, 연동 시 `dist`를
+  `npm pack`/`pnpm pack`한 tarball과 source commit을 manifest에 고정합니다.
+- `packages/pdfgpu/vendor/embedpdf-pdfium-2.14.0.tgz`는 코어 패키지의
+  재배포 경계를 닫는 내부 런타임 자산입니다.
+
 ## 1) Provider Layer (`engine/`, `providers/`)
 
 - `PdfRasterProvider`는 PDF 파싱/래스터 공급 경계를 소유합니다.
@@ -40,6 +50,10 @@
 - background loader는 pending task 우선순위를 계속 갱신하지만 진행 중 IO를 UI thread의 인터랙션 완료 조건으로 삼지 않습니다.
 - 대규모 문서에서도 scheduler는 전체 페이지 preview를 큐에 넣지 않습니다. 현재 active/visible/근접 page만 후보로 만들어 스크롤당 작업량을 viewport 크기에 비례시킵니다.
 - in-memory PDFium은 아직 실제 Web Worker가 아니라 main thread WASM 경로입니다. 그래서 viewer는 고속 입력 중 새 raster 시작을 멈추고, 입력이 잠잠해진 뒤 1개씩 진행해 스크롤 응답성을 우선합니다.
+- `viewer/interaction.ts`는 순수 상태 reducer입니다. `scroll`은 native scroll을
+  유지하고 `single`/`double`은 threshold wheel과 PageUp/PageDown을 bounded
+  navigation effect로 변환합니다. UI 프레임워크는 이 reducer의 source of truth가
+  아닙니다.
 
 ## 4) Render Layer (`render/`)
 

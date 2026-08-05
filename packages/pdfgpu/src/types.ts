@@ -123,6 +123,7 @@ export interface PdfGpuViewerController {
   fitHeight(): void;
   fitPage(): void;
   scrollToPage(index: number): void;
+  getState(): PdfGpuViewerState;
   subscribe(listener: (state: PdfGpuViewerState) => void): () => void;
   dispose(): void;
 }

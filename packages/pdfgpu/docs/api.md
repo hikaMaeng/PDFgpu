@@ -53,6 +53,7 @@
     - `fitHeight()`
     - `fitPage()`
     - `scrollToPage(index)`
+    - `getState()`
     - `subscribe(listener)`
     - `dispose()`
 
@@ -69,3 +70,10 @@
   - `renderQuality`: `'idle' | 'preview' | 'detail'`
   - `detailDpi`: 현재 detail tile 래스터 요청 DPI
   - `backend`: `'webgpu' | 'unsupported' | 'error'`
+
+## 상호작용 API
+
+`viewer/interaction.ts`의 `createViewerInteractionState`, `reduceViewerInteraction`,
+`normalizeViewerPage`, `viewerModeParts`는 package root에서도 export됩니다. 이
+reducer는 DOM이나 React에 의존하지 않으므로 소비자별 UI adapter가 같은 페이지
+이동·휠·키보드 규칙을 공유할 수 있습니다.

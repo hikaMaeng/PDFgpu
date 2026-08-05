@@ -3,7 +3,7 @@ import { describe, it } from 'node:test';
 import { buildLayout, resolveViewportWindow, visiblePageIndices } from '../dist/layout/layout.js';
 import { RasterCache } from '../dist/scheduler/byteBudgetCache.js';
 import { buildRenderQueue } from '../dist/scheduler/queue.js';
-import { normalizeDetailDpi } from '../dist/engine/pdfiumEngine.js';
+import { normalizeDetailDpi } from '../dist/engine/dpi.js';
 
 function createBitmap() {
   return Object.create({ close() {} });

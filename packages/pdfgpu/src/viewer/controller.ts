@@ -14,7 +14,14 @@ import {
   type PdfGpuViewerState,
   type PdfRasterProvider
 } from '../types';
-import { normalizeDetailDpi } from '../engine/pdfiumEngine';
+import { normalizeDetailDpi } from '../engine/dpi';
+import {
+  createViewerInteractionState,
+  normalizeViewerPage,
+  reduceViewerInteraction,
+  viewerModeFromParts,
+  type ViewerInteractionState,
+} from './interaction';
 
 const DEFAULT_MIN_ZOOM = 0.25;
 const DEFAULT_MAX_ZOOM = 8;
@@ -77,6 +84,7 @@ class PdfGpuViewerControllerImpl implements PdfGpuViewerController {
   private queueDepth = 1;
   private queueRefreshToken = 0;
   private state: PdfGpuViewerState;
+  private snapshot: PdfGpuViewerState;
   private disposed = false;
   private manifest: PdfDocumentManifest | null = null;
   private baseScale = 1;
@@ -88,6 +96,7 @@ class PdfGpuViewerControllerImpl implements PdfGpuViewerController {
   private pendingLayout = false;
   private queuePumpScheduled = false;
   private readonly pendingQueueTasks = new Map<string, QueueTask>();
+  private interaction: ViewerInteractionState;
   private interactionUntil = 0;
   private queueIdleTimerId: number | null = null;
   private minZoom = DEFAULT_MIN_ZOOM;
@@ -142,6 +151,11 @@ class PdfGpuViewerControllerImpl implements PdfGpuViewerController {
     const maxQueueDepth = this.engine.kind === 'in-memory' ? 1 : 3;
     this.queueDepth = clamp(1, maxQueueDepth, this.engine.queueDepth ?? 1);
     this.state.queueDepth = this.queueDepth;
+    this.snapshot = { ...this.state, visiblePages: [] };
+    this.interaction = createViewerInteractionState({
+      pageCount: 0,
+      mode: viewerModeFromParts(this.state.scrollMode, this.state.viewMode),
+    });
   }
 
   async initialize(): Promise<void> {
@@ -150,20 +164,26 @@ class PdfGpuViewerControllerImpl implements PdfGpuViewerController {
     this.content.style.position = 'relative';
     this.content.style.width = '100%';
     this.content.style.minHeight = '100%';
-    this.content.style.willChange = 'transform';
+    this.content.style.overflowAnchor = 'none';
 
     this.canvas.setAttribute('aria-hidden', 'true');
-    this.canvas.style.position = 'absolute';
+    this.canvas.style.position = 'sticky';
     this.canvas.style.left = '0';
     this.canvas.style.top = '0';
     this.canvas.style.width = '100%';
-    this.canvas.style.height = '100%';
-    this.canvas.style.pointerEvents = 'none';
+    this.canvas.style.height = '0';
+    this.canvas.style.marginBottom = '0';
+    this.canvas.style.display = 'block';
+    this.canvas.style.pointerEvents = 'auto';
     this.canvas.style.zIndex = '1';
 
     this.viewport.innerHTML = '';
+    // Keep the composited frame in the viewport's coordinate space. Putting it
+    // inside the scrolling content makes it move with the scroll first and
+    // catch up on the next animation frame, which produces a visible jump at
+    // the viewport's top edge.
+    this.viewport.appendChild(this.canvas);
     this.viewport.appendChild(this.content);
-    this.content.appendChild(this.canvas);
     this.bindEvents();
 
     this.state.backend = await this.renderer.init(this.canvas);
@@ -204,6 +224,7 @@ class PdfGpuViewerControllerImpl implements PdfGpuViewerController {
     this.assertAlive();
     if (this.state.viewMode === mode) return;
     this.state.viewMode = mode;
+    this.syncInteractionMode();
     this.reapplyFitOrLayout();
   }
 
@@ -227,6 +248,7 @@ class PdfGpuViewerControllerImpl implements PdfGpuViewerController {
     this.assertAlive();
     if (this.state.scrollMode === mode) return;
     this.state.scrollMode = mode;
+    this.syncInteractionMode();
     this.notify();
   }
 
@@ -260,16 +282,28 @@ class PdfGpuViewerControllerImpl implements PdfGpuViewerController {
 
   scrollToPage(index: number): void {
     if (!this.manifest) return;
-    const target = Math.max(0, Math.min(this.manifest.pageCount - 1, index));
+    const targetPage = normalizeViewerPage(index + 1, this.manifest.pageCount, this.interaction.mode);
+    this.interaction = reduceViewerInteraction(this.interaction, { type: 'setPage', page: targetPage }).state;
+    const target = targetPage - 1;
     const position = this.layout.pagePositions[target];
     if (!position) return;
-    this.viewport.scrollTop = Math.max(0, position.top);
+    this.activePageIndex = target;
+    this.state.activePage = targetPage;
+    this.viewport.scrollTop = Math.max(
+      0,
+      position.top + position.height / 2 - (this.viewport.clientHeight || 1) / 2,
+    );
     this.scheduleUpdate();
+    this.notify();
+  }
+
+  getState(): PdfGpuViewerState {
+    return this.snapshot;
   }
 
   subscribe(listener: (state: PdfGpuViewerState) => void): () => void {
     this.listeners.add(listener);
-    listener(this.state);
+    listener(this.snapshot);
     return () => {
       this.listeners.delete(listener);
     };
@@ -316,6 +350,7 @@ class PdfGpuViewerControllerImpl implements PdfGpuViewerController {
       error: null,
       activePage: undefined
     };
+    this.snapshot = { ...this.state, visiblePages: [] };
     this.viewport.replaceChildren();
   }
 
@@ -341,6 +376,10 @@ class PdfGpuViewerControllerImpl implements PdfGpuViewerController {
       }
 
       this.manifest = manifest;
+      this.interaction = reduceViewerInteraction(this.interaction, {
+        type: 'setPageCount',
+        pageCount: manifest.pageCount,
+      }).state;
       this.pageSizes = manifest.pages.map((page) => ({
         width: Math.max(1, Math.round(page.widthPts * BASE_PREVIEW_DPI / 72)),
         height: Math.max(1, Math.round(page.heightPts * BASE_PREVIEW_DPI / 72))
@@ -382,10 +421,21 @@ class PdfGpuViewerControllerImpl implements PdfGpuViewerController {
       this.overscanPages
     );
     this.visiblePages = visiblePageIndices(this.layout.pagePositions, window);
-    const active = this.chooseActivePage(this.visiblePages, window);
-    this.activePageIndex = active;
+    const active = this.interaction.mode === 'scroll'
+      ? this.chooseActivePage(this.visiblePages, window)
+      : this.interaction.page - 1;
+    const normalizedActive = active === undefined
+      ? undefined
+      : normalizeViewerPage(active + 1, this.manifest.pageCount, this.interaction.mode) - 1;
+    this.activePageIndex = normalizedActive;
     this.state.visiblePages = [...this.visiblePages];
-    this.state.activePage = active !== undefined ? active + 1 : this.state.activePage;
+    this.state.activePage = normalizedActive !== undefined ? normalizedActive + 1 : this.state.activePage;
+    if (normalizedActive !== undefined) {
+      this.interaction = reduceViewerInteraction(this.interaction, {
+        type: 'setPage',
+        page: normalizedActive + 1,
+      }).state;
+    }
     this.state.renderQuality = this.currentBucketDpi > BASE_PREVIEW_DPI ? 'detail' : 'preview';
 
     this.applyVisibleShells();
@@ -606,8 +656,11 @@ class PdfGpuViewerControllerImpl implements PdfGpuViewerController {
     this.canvas.height = height;
     this.canvas.style.width = `${width}px`;
     this.canvas.style.height = `${height}px`;
+    // The sticky canvas is an overlay; cancel its flow height so the first
+    // page keeps the same top coordinate as the scroll content.
+    this.canvas.style.marginBottom = `${-height}px`;
     this.canvas.style.top = '0';
-    this.canvas.style.transform = `translateY(${Math.round(viewportTop)}px)`;
+    this.canvas.style.transform = 'none';
 
     const tiles = [];
     const visibleSet = new Set(visiblePages);
@@ -637,7 +690,6 @@ class PdfGpuViewerControllerImpl implements PdfGpuViewerController {
       );
 
       if (preview) {
-        const widthScale = this.baseScale * BASE_PREVIEW_DPI / preview.dpi;
         tiles.push({
           source: preview.source,
           left: Math.round(pageLeft),
@@ -938,11 +990,11 @@ class PdfGpuViewerControllerImpl implements PdfGpuViewerController {
   }
 
   private notify() {
-    const next: PdfGpuViewerState = {
+    this.snapshot = {
       ...this.state,
       visiblePages: [...this.visiblePages]
     };
-    this.listeners.forEach((listener) => listener(next));
+    this.listeners.forEach((listener) => listener(this.snapshot));
   }
 
   private onScroll = () => {
@@ -952,10 +1004,21 @@ class PdfGpuViewerControllerImpl implements PdfGpuViewerController {
 
   private onWheel = (event: WheelEvent) => {
     this.markActiveInteraction();
-    if (!event.ctrlKey) return;
-    event.preventDefault();
-    if (event.deltaY < 0) this.zoomIn();
-    else this.zoomOut();
+    const transition = reduceViewerInteraction(this.interaction, {
+      type: 'wheel',
+      deltaY: event.deltaY,
+      ctrlKey: event.ctrlKey,
+    });
+    this.interaction = transition.state;
+    if (transition.preventDefault) event.preventDefault();
+    for (const effect of transition.effects) {
+      if (effect.type === 'zoom') {
+        if (effect.direction === 'in') this.zoomIn();
+        else this.zoomOut();
+      } else if (effect.type === 'navigate') {
+        this.scrollToPage(effect.page - 1);
+      }
+    }
   };
 
   private markActiveInteraction() {
@@ -983,10 +1046,25 @@ class PdfGpuViewerControllerImpl implements PdfGpuViewerController {
   private setContainerAria() {
     this.viewport.style.position = this.viewport.style.position || 'relative';
     this.viewport.style.overflow = this.viewport.style.overflow || 'auto';
+    this.viewport.style.overflowX = 'hidden';
+    this.viewport.style.overflowY = 'auto';
+    this.viewport.style.overflowAnchor = 'none';
+    this.viewport.style.overscrollBehavior = 'contain';
     this.viewport.tabIndex = 0;
     this.viewport.setAttribute('role', VIEWPORT_REGION_ROLE);
     this.viewport.setAttribute('aria-label', VIEWPORT_REGION_LABEL);
     this.viewport.dataset.pdfgpuViewport = 'true';
+  }
+
+  private syncInteractionMode() {
+    this.interaction = reduceViewerInteraction(this.interaction, {
+      type: 'setMode',
+      mode: viewerModeFromParts(this.state.scrollMode, this.state.viewMode),
+    }).state;
+    if (this.interaction.pageCount > 0) {
+      this.state.activePage = this.interaction.page;
+      this.activePageIndex = this.interaction.page - 1;
+    }
   }
 
   private assertAlive() {
