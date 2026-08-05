@@ -5,8 +5,16 @@
   <p>Keep the viewer. Change the PDF backend.</p>
 </div>
 
+> The in-memory path is powered by
+> [`@embedpdf/pdfium@2.14.0`](https://www.embedpdf.com/docs/pdfium/getting-started),
+> a WebAssembly build of [PDFium](https://github.com/chromium/pdfium), the
+> open-source PDF engine used by Chromium's PDF viewer. PDFGPU contributes the
+> viewer pipeline around this parser: progressive tiles, scheduling, caching,
+> layout, and composition.
+
 ## Highlights
 
+- Chromium-grade PDFium parsing and rasterization in the browser.
 - Progressive preview and viewport-driven detail tiles.
 - In-memory PDFium, HTTP, and WebSocket providers behind one contract.
 - WebGPU composition with Canvas 2D fallback.
@@ -63,9 +71,18 @@ const provider = createWebApiPdfRasterProvider('/api/pdfgpu');
 | Check consumer obligations | [Constraints](docs/constraints.md) |
 | Understand scheduling and caching | [Internals](docs/internals.md) |
 | Run package and browser tests | [Testing](docs/testing.md) |
+| Understand PDFium release coupling | [Release versioning](docs/release-versioning.md) |
 
 PDFGPU `v0.1.0` is available as the exact
 [GitHub Release artifact](https://github.com/hikaMaeng/PDFgpu/releases/tag/v0.1.0).
+
+## PDFium dependency contract
+
+`@pdfgpu/core@0.1.0` requires exactly `@embedpdf/pdfium@2.14.0`.
+The dependency specifier, lockfile integrity, and WASM import path are checked
+by the [release contract](../../release-contracts/pdfgpu/v0.1.0.json) before
+build and test. A future PDFium update must ship as a new PDFGPU release and
+new versioned contract.
 
 ---
 
@@ -78,8 +95,15 @@ PDFGPU `v0.1.0` is available as the exact
   <p>뷰어는 유지하고 PDF backend만 교체하십시오.</p>
 </div>
 
+> In-memory 경로는 Chromium PDF viewer에 사용되는 오픈소스 PDFium의
+> WebAssembly 빌드인
+> [`@embedpdf/pdfium@2.14.0`](https://www.embedpdf.com/docs/pdfium/getting-started)을
+> 기반으로 합니다. PDFGPU는 parser를 다시 만들지 않고 progressive tile,
+> scheduling, caching, layout, composition을 그 위에 제공합니다.
+
 ## 핵심 기능
 
+- 브라우저에서 동작하는 Chromium급 PDFium 파싱과 래스터화
 - progressive preview와 viewport 기반 detail tile
 - 하나의 계약 뒤에 연결되는 in-memory PDFium, HTTP, WebSocket provider
 - WebGPU 합성과 Canvas 2D fallback
@@ -140,3 +164,11 @@ const provider = createWebApiPdfRasterProvider('/api/pdfgpu');
 PDFGPU `v0.1.0`은 정확한
 [GitHub Release artifact](https://github.com/hikaMaeng/PDFgpu/releases/tag/v0.1.0)로
 사용할 수 있습니다.
+
+## PDFium 의존성 계약
+
+`@pdfgpu/core@0.1.0`은 정확히 `@embedpdf/pdfium@2.14.0`을 요구합니다.
+의존성 specifier, lockfile integrity, WASM import 경로는 빌드와 테스트 전에
+[릴리스 계약](../../release-contracts/pdfgpu/v0.1.0.json)으로 검증됩니다.
+향후 PDFium 업데이트는 반드시 새 PDFGPU 릴리스와 새 버전별 계약 파일로
+반영합니다.

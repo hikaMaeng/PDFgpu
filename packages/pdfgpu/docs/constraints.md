@@ -1,7 +1,8 @@
 # 제약 사항
 
 - 뷰어는 브라우저 전용입니다. Node-only 환경에서는 DOM/WebGPU 표면을 만들 수 없습니다.
-- in-memory 공급자는 브라우저 전용 PDFium WASM을 사용합니다.
+- in-memory 공급자는 Chromium PDF viewer 계열의 오픈소스 PDFium을
+  WebAssembly로 빌드한 `@embedpdf/pdfium@2.14.0`을 사용합니다.
 - 원격 공급자는 HTTP 또는 WebSocket 서버가 이미 PDF 파싱과 DPI별 래스터 생성을 끝낸 이미지를 반환해야 합니다.
 - 앱 서버의 원격 공급자 엔드포인트는 프로토콜 실증용이며, 네이티브 PDF 파서가 붙은 생산 구현이 아닙니다.
 - PDF.js 폴백을 제공하지 않습니다.
@@ -14,6 +15,9 @@
 - PDFium WASM은 `@embedpdf/pdfium@2.14.0`의 고정 semver dependency에서만
   공급합니다. PDFium 버전을 변경할 때는 package 버전과 통합 manifest를
   함께 갱신해야 합니다.
+- `release-contracts/pdfgpu/v<PDFGPU-version>.json`은 PDFium dependency의
+  릴리스별 불변 기록입니다. 이전 PDFGPU 릴리스의 계약 파일을 수정하지
+  않습니다.
 
 ## 브라우저 테스트 마크업 계약
 

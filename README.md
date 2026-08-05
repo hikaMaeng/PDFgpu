@@ -18,6 +18,13 @@ PDFGPU is a provider-independent, progressive PDF viewer core for the modern web
   </p>
 </div>
 
+> **Powered by PDFium.** PDFGPU's in-memory provider uses
+> [`@embedpdf/pdfium@2.14.0`](https://www.embedpdf.com/docs/pdfium/getting-started),
+> a WebAssembly build of [PDFium](https://github.com/chromium/pdfium), the
+> open-source PDF engine used by Chromium's PDF viewer. PDFGPU does not replace
+> that parser with a JavaScript approximation; it adds progressive scheduling,
+> caching, layout, and GPU composition around it.
+
 ## Why PDFGPU?
 
 Most PDF viewers make the rendering backend part of the application. PDFGPU
@@ -26,6 +33,9 @@ application choose where PDF parsing and rendering should run.
 
 - **Progressive by design** — show a 96-DPI preview first, then refine only the
   visible pages with high-DPI detail tiles.
+- **A serious parser underneath** — complex PDF parsing and page rasterization
+  start from PDFium's mature C++ engine compiled to WebAssembly, not a thin
+  browser-only PDF loader.
 - **Backend agnostic** — use browser-local PDFium, an HTTP service, or a
   WebSocket service without replacing the viewer.
 - **GPU-first, resilient fallback** — compose visible tiles with WebGPU when it
@@ -188,6 +198,18 @@ composition. Text selection, full-text search, annotations, and document
 management are intentionally outside the current core. They can be built above
 the provider and viewer contracts without coupling the library to one product.
 
+## PDFium release contract
+
+`@pdfgpu/core@0.1.0` pins the in-memory parser and rasterizer to
+`@embedpdf/pdfium@2.14.0`. The dependency is exact in `package.json`, resolved
+and integrity-pinned in `pnpm-lock.yaml`, and recorded in the immutable
+[v0.1.0 release contract](release-contracts/pdfgpu/v0.1.0.json).
+
+PDFium updates are PDFGPU release events. A compatible PDFium patch update
+creates a new PDFGPU patch release such as `0.1.1`; a change that requires
+consumer migration creates a new minor release such as `0.2.0`. The old
+PDFGPU release never silently begins using a newer PDFium binary.
+
 ## Documentation
 
 - [Overview](packages/pdfgpu/docs/overview.md) — package boundary and design intent
@@ -197,6 +219,7 @@ the provider and viewer contracts without coupling the library to one product.
 - [Constraints](packages/pdfgpu/docs/constraints.md) — consumer and browser contracts
 - [Internals](packages/pdfgpu/docs/internals.md) — scheduling, cache, and rendering decisions
 - [Testing](packages/pdfgpu/docs/testing.md) — unit, integration, and browser verification
+- [Release versioning](packages/pdfgpu/docs/release-versioning.md) — PDFium dependency and release contract policy
 
 ## Repository layout
 
@@ -210,6 +233,7 @@ the provider and viewer contracts without coupling the library to one product.
 ## Development
 
 ```bash
+pnpm run verify:release-contract
 pnpm --filter @pdfgpu/core test
 pnpm run build
 ```
@@ -227,6 +251,13 @@ release artifact and can advance on their own release schedule.
   WebGPU 우선 합성, 교체 가능한 raster provider, 대형 문서에서도 응답성을 유지하는 뷰어입니다.</p>
 </div>
 
+> **PDFium 기반.** PDFGPU의 in-memory provider는
+> [`@embedpdf/pdfium@2.14.0`](https://www.embedpdf.com/docs/pdfium/getting-started)을
+> 사용합니다. 이는 Chromium PDF viewer에 사용되는 오픈소스
+> [PDFium](https://github.com/chromium/pdfium)의 WebAssembly 빌드입니다.
+> PDFGPU는 JavaScript로 PDF parser를 다시 구현하지 않고, PDFium 위에
+> progressive scheduling, caching, layout, GPU composition을 추가합니다.
+
 ## 왜 PDFGPU인가?
 
 일반적인 PDF 뷰어는 렌더링 backend를 애플리케이션에 강하게 결합합니다.
@@ -235,6 +266,9 @@ PDFGPU는 반대로 작은 raster 계약을 제공하고, PDF 파싱과 렌더�
 
 - **처음부터 progressive입니다.** 96-DPI preview를 먼저 보여주고,
   화면에 보이는 페이지만 고해상도 detail tile로 보강합니다.
+- **검증된 parser가 아래에 있습니다.** 복잡한 PDF 파싱과 페이지 래스터화는
+  얇은 브라우저 전용 loader가 아니라 WebAssembly로 컴파일된 PDFium의
+  성숙한 C++ 엔진에서 시작합니다.
 - **backend에 독립적입니다.** 브라우저 내부 PDFium, HTTP 서비스,
   WebSocket 서비스를 뷰어 교체 없이 사용할 수 있습니다.
 - **GPU 우선이면서 안전합니다.** WebGPU가 가능하면 visible tile을 합성하고,
@@ -409,3 +443,18 @@ pnpm run build
 
 PDFGPU는 독립 라이브러리입니다. PDFit 같은 통합 프로젝트는 고정된
 릴리스 artifact를 사용하며 서로 다른 릴리스 일정으로 발전할 수 있습니다.
+
+## PDFium 릴리스 계약
+
+`@pdfgpu/core@0.1.0`은 in-memory parser와 rasterizer로
+`@embedpdf/pdfium@2.14.0`을 사용합니다. 이 의존성은 `package.json`에서
+exact로 선언되고, `pnpm-lock.yaml`에서 resolution과 integrity가 고정되며,
+[v0.1.0 릴리스 계약](release-contracts/pdfgpu/v0.1.0.json)에 기록됩니다.
+
+PDFium 업데이트는 PDFGPU 릴리스 변경입니다. 호환 가능한 PDFium patch
+업데이트는 `0.1.1`과 같은 새 PDFGPU patch 릴리스를 만들고, 소비자 마이그레이션이
+필요한 변경은 `0.2.0`과 같은 새 minor 릴리스로 올립니다. 기존 PDFGPU
+릴리스가 조용히 새로운 PDFium 바이너리를 사용하게 두지 않습니다.
+
+자세한 정책은 [릴리스 버전 관리 문서](packages/pdfgpu/docs/release-versioning.md)를
+참조하십시오.
