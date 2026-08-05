@@ -1,37 +1,142 @@
-WebGPU PDF viewer core with pluggable raster providers.
+`@pdfgpu/core` is a provider-independent, progressive PDF viewer core for the web.
 
-| Goal               | File                  |
-|--------------------|-----------------------|
-| Understand purpose | README.md             |
-| Package overview   | docs/overview.md      |
-| Architecture       | docs/architecture.md  |
-| API reference      | docs/api.md           |
-| Usage              | docs/usage.md         |
-| Constraints        | docs/constraints.md   |
-| Internals          | docs/internals.md     |
-| Testing            | docs/testing.md       |
+<div align="center">
+  <h1>@pdfgpu/core</h1>
+  <p>Keep the viewer. Change the PDF backend.</p>
+</div>
 
-## 현재 범위
+## Highlights
 
-- `PdfRasterProvider`: 파싱 완료 문서에서 특정 DPI preview/detail 이미지를 공급하는 계약
-- 공급자 구현: in-memory PDFium, HTTP Web API, WebSocket JSON RPC
-- `createPdfGpuViewer`: 공급자가 반환한 이미지를 단일 WebGPU 캔버스로 합성하는 뷰어
-- `viewer/interaction.ts`: React와 무관한 페이지/휠/키보드 상호작용 상태 reducer
-- 스케줄링: 가시성 기반 큐, DPI 버킷, LRU 래스터 캐시
+- Progressive preview and viewport-driven detail tiles.
+- In-memory PDFium, HTTP, and WebSocket providers behind one contract.
+- WebGPU composition with Canvas 2D fallback.
+- Visibility-aware scheduling, cancellation, and byte-budgeted caching.
+- No React dependency; framework-independent interaction state.
 
-## 배포 경계
+## Install
 
-이 디렉터리가 `@pdfgpu/core`의 유일한 소스 경계입니다. PDFit 같은 소비자는
-`dist`를 직접 복사하지 않고 이 패키지를 빌드·pack한 버전 고정 tarball을
-사용합니다. PDFium WASM tarball은 `vendor/` 아래에 포함되어 패키지가 형제
-저장소의 파일 경로에 의존하지 않도록 합니다. PDFium은 공개된
-`@embedpdf/pdfium@2.14.0` semver dependency로 해석됩니다.
+```json
+{
+  "dependencies": {
+    "@pdfgpu/core": "https://github.com/hikaMaeng/PDFgpu/releases/download/v0.1.0/pdfgpu-core-0.1.0.tgz"
+  }
+}
+```
 
-## 주요 API
+## Minimal usage
 
-- `createPdfDocumentEngine()`
-- `createInMemoryPdfRasterProvider(provider)`
-- `createWebApiPdfRasterProvider(endpoint)`
-- `createWebSocketPdfRasterProvider(endpoint)`
-- `createPdfGpuViewer(options)`
-- `normalizeDetailDpi(rawDpi)`
+```ts
+import {
+  createPdfDocumentEngine,
+  createPdfGpuViewer
+} from '@pdfgpu/core';
+
+const provider = await createPdfDocumentEngine();
+const container = document.querySelector<HTMLElement>('#viewer');
+if (!container) throw new Error('viewer container is missing');
+
+const viewer = await createPdfGpuViewer({
+  container,
+  provider,
+  detailDpi: 192
+});
+
+await viewer.load('/document.pdf');
+```
+
+Replace the provider to move rendering to a service:
+
+```ts
+import { createWebApiPdfRasterProvider } from '@pdfgpu/core';
+
+const provider = createWebApiPdfRasterProvider('/api/pdfgpu');
+```
+
+## Documentation
+
+| Goal | Documentation |
+| --- | --- |
+| Understand the package boundary | [Overview](docs/overview.md) |
+| Locate source ownership | [Architecture](docs/architecture.md) |
+| Integrate the public API | [API reference](docs/api.md) |
+| Build local or remote viewers | [Usage](docs/usage.md) |
+| Check consumer obligations | [Constraints](docs/constraints.md) |
+| Understand scheduling and caching | [Internals](docs/internals.md) |
+| Run package and browser tests | [Testing](docs/testing.md) |
+
+PDFGPU `v0.1.0` is available as the exact
+[GitHub Release artifact](https://github.com/hikaMaeng/PDFgpu/releases/tag/v0.1.0).
+
+---
+
+# 한국어
+
+`@pdfgpu/core`는 웹을 위한 공급자 독립형 progressive PDF 뷰어 코어입니다.
+
+<div align="center">
+  <h1>@pdfgpu/core</h1>
+  <p>뷰어는 유지하고 PDF backend만 교체하십시오.</p>
+</div>
+
+## 핵심 기능
+
+- progressive preview와 viewport 기반 detail tile
+- 하나의 계약 뒤에 연결되는 in-memory PDFium, HTTP, WebSocket provider
+- WebGPU 합성과 Canvas 2D fallback
+- 가시성 기반 scheduling, 취소, byte-budget cache
+- React 비의존 및 프레임워크 독립 interaction state
+
+## 설치
+
+```json
+{
+  "dependencies": {
+    "@pdfgpu/core": "https://github.com/hikaMaeng/PDFgpu/releases/download/v0.1.0/pdfgpu-core-0.1.0.tgz"
+  }
+}
+```
+
+## 최소 사용법
+
+```ts
+import {
+  createPdfDocumentEngine,
+  createPdfGpuViewer
+} from '@pdfgpu/core';
+
+const provider = await createPdfDocumentEngine();
+const container = document.querySelector<HTMLElement>('#viewer');
+if (!container) throw new Error('viewer container is missing');
+
+const viewer = await createPdfGpuViewer({
+  container,
+  provider,
+  detailDpi: 192
+});
+
+await viewer.load('/document.pdf');
+```
+
+provider만 바꾸면 렌더링을 원격 서비스로 이동할 수 있습니다.
+
+```ts
+import { createWebApiPdfRasterProvider } from '@pdfgpu/core';
+
+const provider = createWebApiPdfRasterProvider('/api/pdfgpu');
+```
+
+## 문서
+
+| 목적 | 문서 |
+| --- | --- |
+| 패키지 경계 이해 | [개요](docs/overview.md) |
+| 소스 책임 확인 | [아키텍처](docs/architecture.md) |
+| 공개 API 통합 | [API](docs/api.md) |
+| local/remote viewer 구성 | [사용 방법](docs/usage.md) |
+| 소비자 의무 확인 | [제약 사항](docs/constraints.md) |
+| scheduling과 caching 이해 | [내부 동작](docs/internals.md) |
+| 패키지와 브라우저 테스트 실행 | [테스트](docs/testing.md) |
+
+PDFGPU `v0.1.0`은 정확한
+[GitHub Release artifact](https://github.com/hikaMaeng/PDFgpu/releases/tag/v0.1.0)로
+사용할 수 있습니다.
