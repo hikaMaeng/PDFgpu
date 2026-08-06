@@ -34,6 +34,7 @@ const BASE_PREVIEW_DPI = 96;
 const DEFAULT_DETAIL_DPI = 192;
 const LOAD_PARSE_PROGRESS = 35;
 const LOAD_PARSE_TRANSITION_MS = 900;
+const LOAD_READY_TRANSITION_MS = 1400;
 const MAX_PENDING_QUEUE_TASKS = 96;
 const INTERACTION_IDLE_MS = 140;
 
@@ -110,6 +111,7 @@ class PdfGpuViewerControllerImpl implements PdfGpuViewerController {
   private spreadGap = DEFAULT_SPREAD_GAP;
   private rafId: number | null = null;
   private loadProgressRafId: number | null = null;
+  private loadReadyAnimationRunning = false;
 
   constructor(options: PdfGpuViewerOptions) {
     this.container = options.container;
@@ -329,6 +331,7 @@ class PdfGpuViewerControllerImpl implements PdfGpuViewerController {
       cancelAnimationFrame(this.loadProgressRafId);
       this.loadProgressRafId = null;
     }
+    this.loadReadyAnimationRunning = false;
     if (this.queueIdleTimerId !== null) {
       window.clearTimeout(this.queueIdleTimerId);
       this.queueIdleTimerId = null;
@@ -516,6 +519,8 @@ class PdfGpuViewerControllerImpl implements PdfGpuViewerController {
     });
 
     const tasksToRun = this.toRenderTaskList(tasks);
+    const desiredKeys = new Set(tasksToRun.map((task) => task.key));
+    this.cancelStaleQueueWork(desiredKeys);
     const keepKeys = this.collectKeepKeys(visiblePages);
     this.cache.prune(keepKeys);
 
@@ -625,6 +630,8 @@ class PdfGpuViewerControllerImpl implements PdfGpuViewerController {
           return;
         }
 
+        const protectedKeys = this.collectKeepKeys(this.visiblePages);
+        protectedKeys.add(key);
         this.cache.set({
           kind: task.kind,
           pageIndex: task.pageIndex,
@@ -640,7 +647,7 @@ class PdfGpuViewerControllerImpl implements PdfGpuViewerController {
           sourceHeight: result.height,
           dpiRounded: normalizeDetailDpi(result.dpi),
           key
-        });
+        }, protectedKeys);
         if (this.visiblePages.includes(task.pageIndex)) {
           this.applyCompositedFrame(this.visiblePages);
         }
@@ -813,6 +820,20 @@ class PdfGpuViewerControllerImpl implements PdfGpuViewerController {
     return keep;
   }
 
+  private cancelStaleQueueWork(desiredKeys: ReadonlySet<string>): void {
+    for (const key of this.pendingQueueTasks.keys()) {
+      if (!desiredKeys.has(key)) {
+        this.pendingQueueTasks.delete(key);
+      }
+    }
+
+    for (const [key, signal] of this.inFlightTasks) {
+      if (!desiredKeys.has(key)) {
+        signal.abort();
+      }
+    }
+  }
+
   private toRenderTaskList(tasks: QueueRenderTask[]): QueueTask[] {
     const deduped = new Map<string, QueueTask>();
     for (const task of tasks) {
@@ -837,14 +858,23 @@ class PdfGpuViewerControllerImpl implements PdfGpuViewerController {
     const loadedPages = [...this.initialPreviewPages].filter((pageIndex) => this.pageHasPreview(pageIndex)).length;
     this.state.loadedPages = loadedPages;
     if (this.state.loadProgress < LOAD_PARSE_PROGRESS) return;
-    this.state.loadProgress = Math.min(99, LOAD_PARSE_PROGRESS + Math.round((loadedPages / this.initialPreviewPages.size) * (100 - LOAD_PARSE_PROGRESS)));
     if (loadedPages >= this.initialPreviewPages.size) {
-      this.state.loadProgress = 100;
-      this.state.loadPhase = 'ready';
+      if (!this.loadReadyAnimationRunning) {
+        this.loadReadyAnimationRunning = true;
+        this.animateLoadProgressTo(100, LOAD_READY_TRANSITION_MS, () => {
+          this.loadReadyAnimationRunning = false;
+          if (this.state.loadPhase !== 'rendering') return;
+          this.state.loadProgress = 100;
+          this.state.loadPhase = 'ready';
+          this.notify();
+        });
+      }
+      return;
     }
+    this.state.loadProgress = Math.min(99, LOAD_PARSE_PROGRESS + Math.round((loadedPages / this.initialPreviewPages.size) * (100 - LOAD_PARSE_PROGRESS)));
   }
 
-  private animateLoadProgressTo(target: number): void {
+  private animateLoadProgressTo(target: number, duration = LOAD_PARSE_TRANSITION_MS, onComplete?: () => void): void {
     if (this.loadProgressRafId !== null) {
       cancelAnimationFrame(this.loadProgressRafId);
       this.loadProgressRafId = null;
@@ -852,21 +882,23 @@ class PdfGpuViewerControllerImpl implements PdfGpuViewerController {
     const start = this.state.loadProgress;
     if (start >= target) {
       this.state.loadProgress = target;
-      this.updateLoadProgress();
+      onComplete?.();
+      if (!onComplete) this.updateLoadProgress();
       this.notify();
       return;
     }
     const startedAt = performance.now();
     const tick = (now: number) => {
       if (this.disposed) return;
-      const ratio = Math.min(1, (now - startedAt) / LOAD_PARSE_TRANSITION_MS);
+      const ratio = Math.min(1, (now - startedAt) / duration);
       this.state.loadProgress = Math.round(start + (target - start) * ratio);
       this.notify();
       if (ratio < 1) {
         this.loadProgressRafId = requestAnimationFrame(tick);
       } else {
         this.loadProgressRafId = null;
-        this.updateLoadProgress();
+        if (onComplete) onComplete();
+        else this.updateLoadProgress();
         this.notify();
       }
     };
