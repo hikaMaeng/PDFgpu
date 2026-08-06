@@ -1,0 +1,11 @@
+{
+  "pdfgpuVersion": "0.1.3",
+  "corePackageName": "@pdfgpu/core",
+  "pdfium": {
+    "packageName": "@embedpdf/pdfium",
+    "packageVersion": "2.14.0",
+    "dependencySpec": "2.14.0",
+    "wasmModulePath": "@embedpdf/pdfium/pdfium.wasm?url",
+    "lockfileIntegrity": "sha512-yOg1VcIZPXASrzNmS4ZRjo78SUxf9ohey2zTSP7qOR+opMS0OenI/iXtbFGizpZFtk0gfK1Y1HQOxvDpuIiOEw=="
+  }
+}
