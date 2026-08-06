@@ -3,7 +3,8 @@
 ## 공급자
 
 - `PdfRasterProvider`
-  - `open(source): Promise<PdfDocumentManifest>`
+  - `open(source, onProgress?): Promise<PdfDocumentManifest>`
+  - `onProgress` receives downloaded byte counts when the source is fetched by the provider.
   - `renderPreview({ pageIndex, signal }): Promise<PdfRasterResult>`
   - `renderTile({ pageIndex, dpi, tileX, tileY, tileWidth, tileHeight, signal }): Promise<PdfRasterResult>`
   - `dispose(): void | Promise<void>`
@@ -70,6 +71,10 @@
   - `renderQuality`: `'idle' | 'preview' | 'detail'`
   - `detailDpi`: 현재 detail tile 래스터 요청 DPI
   - `backend`: `'webgpu' | 'unsupported' | 'error'`
+  - `loadPhase`: `'idle' | 'opening' | 'rendering' | 'ready' | 'error'`
+  - `loadProgress`: 0..100 progress for opening and the initial viewport
+  - `loadProgressDeterminate`: whether the download response exposed a usable total size
+  - `loadedPages` / `loadPageCount`: initial preview pages completed and target count
 
 ## 상호작용 API
 

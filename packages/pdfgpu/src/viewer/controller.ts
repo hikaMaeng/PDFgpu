@@ -12,7 +12,8 @@ import {
   type PdfGpuViewerController,
   type PdfGpuViewerOptions,
   type PdfGpuViewerState,
-  type PdfRasterProvider
+  type PdfRasterProvider,
+  type PdfLoadProgress
 } from '../types.js';
 import { normalizeDetailDpi } from '../engine/dpi.js';
 import {
@@ -131,6 +132,7 @@ class PdfGpuViewerControllerImpl implements PdfGpuViewerController {
       loading: false,
       loadPhase: 'idle',
       loadProgress: 0,
+      loadProgressDeterminate: false,
       loadedPages: 0,
       loadPageCount: 0,
       error: null,
@@ -354,6 +356,7 @@ class PdfGpuViewerControllerImpl implements PdfGpuViewerController {
       loading: false,
       loadPhase: 'idle',
       loadProgress: 0,
+      loadProgressDeterminate: false,
       loadedPages: 0,
       loadPageCount: 0,
       error: null,
@@ -370,7 +373,8 @@ class PdfGpuViewerControllerImpl implements PdfGpuViewerController {
     this.clearShells();
     this.state.loading = true;
     this.state.loadPhase = 'opening';
-    this.state.loadProgress = 5;
+    this.state.loadProgress = 0;
+    this.state.loadProgressDeterminate = false;
     this.state.loadedPages = 0;
     this.state.loadPageCount = 0;
     this.initialPreviewPages.clear();
@@ -384,7 +388,13 @@ class PdfGpuViewerControllerImpl implements PdfGpuViewerController {
     this.loadSignals.add(openSignal);
     const token = ++this.queueRefreshToken;
     try {
-      const manifest = await this.engine.open(source);
+      const manifest = await this.engine.open(source, (progress: PdfLoadProgress) => {
+        this.state.loadProgressDeterminate = progress.ratio !== undefined;
+        if (progress.ratio !== undefined) {
+          this.state.loadProgress = Math.min(34, Math.round(progress.ratio * 34));
+        }
+        this.notify();
+      });
       if (openSignal.signal.aborted || token !== this.queueRefreshToken || this.disposed) {
         throw new DOMException('load aborted', 'AbortError');
       }
@@ -404,6 +414,7 @@ class PdfGpuViewerControllerImpl implements PdfGpuViewerController {
       this.state.loadPageCount = manifest.pageCount;
       this.state.loadPhase = 'rendering';
       this.state.loadProgress = 35;
+      this.state.loadProgressDeterminate = true;
       this.rebuildLayout();
       this.activePageIndex = manifest.pageCount > 0 ? 0 : undefined;
       this.state.activePage = this.activePageIndex !== undefined ? this.activePageIndex + 1 : undefined;

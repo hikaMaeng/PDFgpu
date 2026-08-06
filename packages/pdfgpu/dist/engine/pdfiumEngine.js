@@ -43,21 +43,58 @@ function assertNotAborted(signal) {
         throw new DOMException('render aborted', 'AbortError');
     }
 }
-async function sourceToBytes(source) {
-    if (source instanceof Uint8Array)
+async function sourceToBytes(source, onProgress) {
+    const reportComplete = (length) => onProgress?.({ loadedBytes: length, totalBytes: length, ratio: 1 });
+    if (source instanceof Uint8Array) {
+        reportComplete(source.byteLength);
         return source;
-    if (source instanceof ArrayBuffer)
-        return new Uint8Array(source);
+    }
+    if (source instanceof ArrayBuffer) {
+        const bytes = new Uint8Array(source);
+        reportComplete(bytes.byteLength);
+        return bytes;
+    }
     if (source instanceof Blob || source instanceof File) {
-        return new Uint8Array(await source.arrayBuffer());
+        const bytes = new Uint8Array(await source.arrayBuffer());
+        reportComplete(bytes.byteLength);
+        return bytes;
     }
-    if (source instanceof URL) {
-        const response = await fetch(source.toString());
-        return new Uint8Array(await response.arrayBuffer());
-    }
-    if (typeof source === 'string') {
-        const response = await fetch(source);
-        return new Uint8Array(await response.arrayBuffer());
+    if (source instanceof URL || typeof source === 'string') {
+        const response = await fetch(source instanceof URL ? source.toString() : source);
+        if (!response.ok)
+            throw new Error(`failed to fetch document: ${response.status}`);
+        const header = response.headers.get('content-length');
+        const totalBytes = header ? Number.parseInt(header, 10) : undefined;
+        if (!response.body) {
+            const bytes = new Uint8Array(await response.arrayBuffer());
+            onProgress?.({ loadedBytes: bytes.byteLength, totalBytes: totalBytes ?? bytes.byteLength, ratio: 1 });
+            return bytes;
+        }
+        const reader = response.body.getReader();
+        const chunks = [];
+        let loadedBytes = 0;
+        while (true) {
+            const { done, value } = await reader.read();
+            if (done)
+                break;
+            if (!value)
+                continue;
+            chunks.push(value);
+            loadedBytes += value.byteLength;
+            onProgress?.({
+                loadedBytes,
+                totalBytes,
+                ratio: totalBytes && totalBytes > 0 ? Math.min(1, loadedBytes / totalBytes) : undefined,
+            });
+        }
+        const bytes = new Uint8Array(loadedBytes);
+        let offset = 0;
+        for (const chunk of chunks) {
+            bytes.set(chunk, offset);
+            offset += chunk.byteLength;
+        }
+        onProgress?.({ loadedBytes, totalBytes: totalBytes ?? loadedBytes, ratio: 1 });
+        return bytes;
     }
     throw new Error('unsupported source type');
 }
@@ -254,10 +291,10 @@ class PdfDocumentEngineImpl {
         this._queueDepth = queueDepth;
         this.workers = Array.from({ length: queueDepth }, () => new PdfiumWorker(pdfium));
     }
-    async open(source) {
+    async open(source, onProgress) {
         this.generation += 1;
         const token = this.generation;
-        const bytes = await sourceToBytes(source);
+        const bytes = await sourceToBytes(source, onProgress);
         const primary = this.workers[0];
         if (!primary)
             throw new Error('PDFium worker pool is empty');

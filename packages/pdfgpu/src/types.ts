@@ -60,8 +60,16 @@ export type PdfGpuFitMode = 'none' | 'width' | 'height' | 'page';
 export type PdfGpuScrollMode = 'continuous' | 'page';
 export type PdfGpuLoadPhase = 'idle' | 'opening' | 'rendering' | 'ready' | 'error';
 
+export interface PdfLoadProgress {
+  loadedBytes: number;
+  totalBytes?: number;
+  ratio?: number;
+}
+
+export type PdfLoadProgressListener = (progress: PdfLoadProgress) => void;
+
 export interface PdfRasterProvider {
-  open(source: PdfDocumentSource): Promise<PdfDocumentManifest>;
+  open(source: PdfDocumentSource, onProgress?: PdfLoadProgressListener): Promise<PdfDocumentManifest>;
   renderPreview(request: PdfPreviewRenderRequest): Promise<PdfRasterResult>;
   renderTile(request: PdfTileRenderRequest): Promise<PdfRasterResult>;
   dispose(): void | Promise<void>;
@@ -108,6 +116,7 @@ export interface PdfGpuViewerState {
   loading: boolean;
   loadPhase: PdfGpuLoadPhase;
   loadProgress: number;
+  loadProgressDeterminate: boolean;
   loadedPages: number;
   loadPageCount: number;
   error: string | null;

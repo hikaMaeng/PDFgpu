@@ -39,6 +39,10 @@
 
 ## PDFium in-memory 공급자
 
+- URL source downloads are read through the response stream. When the server
+  provides `Content-Length`, byte progress is reported to the controller and
+  mapped to the opening portion of `PdfGpuViewerState.loadProgress`; without a
+  total size the consumer receives an indeterminate opening state.
 - 문서 open 시 manifest(page count, page size, rotation)는 첫 PDFium document에서 한 번만 추출합니다.
 - 렌더 worker용 추가 document들은 같은 manifest를 공유합니다. 500페이지급 문서에서 worker 수만큼 모든 페이지를 다시 여는 일을 피합니다.
 
