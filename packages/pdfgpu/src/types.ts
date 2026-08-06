@@ -58,6 +58,7 @@ export type PdfGpuViewMode = 'single' | 'spread';
 export type PdfGpuSpreadPlacement = 'first-left' | 'first-right';
 export type PdfGpuFitMode = 'none' | 'width' | 'height' | 'page';
 export type PdfGpuScrollMode = 'continuous' | 'page';
+export type PdfGpuLoadPhase = 'idle' | 'opening' | 'rendering' | 'ready' | 'error';
 
 export interface PdfRasterProvider {
   open(source: PdfDocumentSource): Promise<PdfDocumentManifest>;
@@ -105,6 +106,10 @@ export interface PdfGpuViewerState {
   detailDpi: number;
   visiblePages: number[];
   loading: boolean;
+  loadPhase: PdfGpuLoadPhase;
+  loadProgress: number;
+  loadedPages: number;
+  loadPageCount: number;
   error: string | null;
   activePage?: number;
 }

@@ -93,6 +93,7 @@ class PdfGpuViewerControllerImpl implements PdfGpuViewerController {
   private activePageIndex: number | undefined = undefined;
   private pageSizes: Array<{ width: number; height: number }> = [];
   private visiblePages: number[] = [];
+  private initialPreviewPages = new Set<number>();
   private pendingLayout = false;
   private queuePumpScheduled = false;
   private readonly pendingQueueTasks = new Map<string, QueueTask>();
@@ -128,6 +129,10 @@ class PdfGpuViewerControllerImpl implements PdfGpuViewerController {
       detailDpi: normalizeDetailDpi(options.detailDpi ?? DEFAULT_DETAIL_DPI),
       visiblePages: [],
       loading: false,
+      loadPhase: 'idle',
+      loadProgress: 0,
+      loadedPages: 0,
+      loadPageCount: 0,
       error: null,
       activePage: undefined
     };
@@ -347,6 +352,10 @@ class PdfGpuViewerControllerImpl implements PdfGpuViewerController {
       detailDpi: this.detailDpi,
       visiblePages: [],
       loading: false,
+      loadPhase: 'idle',
+      loadProgress: 0,
+      loadedPages: 0,
+      loadPageCount: 0,
       error: null,
       activePage: undefined
     };
@@ -360,6 +369,11 @@ class PdfGpuViewerControllerImpl implements PdfGpuViewerController {
     this.cache.clear();
     this.clearShells();
     this.state.loading = true;
+    this.state.loadPhase = 'opening';
+    this.state.loadProgress = 5;
+    this.state.loadedPages = 0;
+    this.state.loadPageCount = 0;
+    this.initialPreviewPages.clear();
     this.state.error = null;
     this.state.renderQuality = 'preview';
     this.visiblePages = [];
@@ -387,6 +401,9 @@ class PdfGpuViewerControllerImpl implements PdfGpuViewerController {
       this.currentBucketDpi = this.detailDpi;
       this.state.renderQuality = this.currentBucketDpi > BASE_PREVIEW_DPI ? 'detail' : 'preview';
       this.state.pageCount = manifest.pageCount;
+      this.state.loadPageCount = manifest.pageCount;
+      this.state.loadPhase = 'rendering';
+      this.state.loadProgress = 35;
       this.rebuildLayout();
       this.activePageIndex = manifest.pageCount > 0 ? 0 : undefined;
       this.state.activePage = this.activePageIndex !== undefined ? this.activePageIndex + 1 : undefined;
@@ -397,11 +414,14 @@ class PdfGpuViewerControllerImpl implements PdfGpuViewerController {
     } catch (error) {
       if (error instanceof DOMException && error.name === 'AbortError') {
         this.state.loading = false;
+        this.state.loadPhase = 'idle';
+        this.state.loadProgress = 0;
         this.notify();
         return;
       }
       if (this.disposed || token !== this.queueRefreshToken) return;
       this.state.loading = false;
+      this.state.loadPhase = 'error';
       this.state.error = error instanceof Error ? error.name + ': ' + error.message : 'failed to open document';
       this.notify();
       throw error;
@@ -421,6 +441,10 @@ class PdfGpuViewerControllerImpl implements PdfGpuViewerController {
       this.overscanPages
     );
     this.visiblePages = visiblePageIndices(this.layout.pagePositions, window);
+    if (this.state.loadPhase === 'rendering' && this.initialPreviewPages.size === 0) {
+      this.initialPreviewPages = new Set(this.visiblePages);
+      this.updateLoadProgress();
+    }
     const active = this.interaction.mode === 'scroll'
       ? this.chooseActivePage(this.visiblePages, window)
       : this.interaction.page - 1;
@@ -598,6 +622,8 @@ class PdfGpuViewerControllerImpl implements PdfGpuViewerController {
       } finally {
         this.inFlightTasks.delete(key);
         this.applyShellState(task.pageIndex);
+        this.updateLoadProgress();
+        this.notify();
       }
     };
 
@@ -776,6 +802,17 @@ class PdfGpuViewerControllerImpl implements PdfGpuViewerController {
       tileY: 0
     });
     return this.cache.has(key);
+  }
+
+  private updateLoadProgress(): void {
+    if (this.state.loadPhase !== 'rendering' || this.initialPreviewPages.size === 0) return;
+    const loadedPages = [...this.initialPreviewPages].filter((pageIndex) => this.pageHasPreview(pageIndex)).length;
+    this.state.loadedPages = loadedPages;
+    this.state.loadProgress = Math.min(99, 35 + Math.round((loadedPages / this.initialPreviewPages.size) * 65));
+    if (loadedPages >= this.initialPreviewPages.size) {
+      this.state.loadProgress = 100;
+      this.state.loadPhase = 'ready';
+    }
   }
 
   private pageHasDetail(pageIndex: number): boolean {

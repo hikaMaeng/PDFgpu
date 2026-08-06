@@ -1,6 +1,6 @@
 {
   "name": "apps-pdfgpu",
-  "version": "0.1.0",
+  "version": "0.1.1",
   "private": true,
   "scripts": {
     "build": "pnpm --dir ./src/client build && pnpm --dir ./src/server build"
