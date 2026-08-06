@@ -154,6 +154,38 @@ describe('texture cache', () => {
     assert.equal(cache.has('p5'), false);
   });
 
+  it('protects visible raster keys while adding new tiles', () => {
+    const cache = new RasterCache({ maxBytes: 80 });
+    const entry = (key, pageIndex) => ({
+      key,
+      kind: 'detail',
+      pageIndex,
+      dpi: 192,
+      tileX: 0,
+      tileY: 0,
+      tileWidth: 1,
+      tileHeight: 1,
+      sourceWidth: 4,
+      sourceHeight: 4,
+      dpiRounded: 192,
+      source: createBitmap(),
+      width: 4,
+      height: 4
+    });
+
+    cache.set(entry('detail/0/192/0/0', 0));
+    cache.set(entry('detail/0/192/0/512', 0), new Set(['detail/0/192/0/0', 'detail/0/192/0/512']));
+    cache.set(entry('detail/0/192/0/1024', 0), new Set([
+      'detail/0/192/0/0',
+      'detail/0/192/0/512',
+      'detail/0/192/0/1024'
+    ]));
+
+    assert.equal(cache.has('detail/0/192/0/0'), true);
+    assert.equal(cache.has('detail/0/192/0/512'), true);
+    assert.equal(cache.has('detail/0/192/0/1024'), true);
+  });
+
   it('sorts render queue by priority', () => {
     const layout = {
       pagePositions: [

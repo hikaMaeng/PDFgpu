@@ -30,7 +30,7 @@ export class RasterCache {
         this.entriesMap.set(key, entry);
         return entry;
     }
-    set(entry) {
+    set(entry, protectedKeys = new Set()) {
         const bytes = estimateBytes(entry.width, entry.height);
         const normalized = {
             key: entry.key,
@@ -57,7 +57,7 @@ export class RasterCache {
         }
         this.entriesMap.set(entry.key, normalized);
         this.bytesUsed += bytes;
-        this.evict(new Set());
+        this.evict(protectedKeys);
     }
     delete(key) {
         const entry = this.entriesMap.get(key);

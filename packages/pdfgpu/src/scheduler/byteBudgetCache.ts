@@ -65,7 +65,10 @@ export class RasterCache {
     return entry;
   }
 
-  set(entry: Omit<CachedRaster, 'bytes'> & { width: number; height: number; sourceWidth?: number; sourceHeight?: number; dpiRounded?: number }) {
+  set(
+    entry: Omit<CachedRaster, 'bytes'> & { width: number; height: number; sourceWidth?: number; sourceHeight?: number; dpiRounded?: number },
+    protectedKeys: ReadonlySet<string> = new Set(),
+  ) {
     const bytes = estimateBytes(entry.width, entry.height);
     const normalized: CachedRaster = {
       key: entry.key,
@@ -93,7 +96,7 @@ export class RasterCache {
 
     this.entriesMap.set(entry.key, normalized);
     this.bytesUsed += bytes;
-    this.evict(new Set());
+    this.evict(protectedKeys);
   }
 
   delete(key: string) {
@@ -128,7 +131,7 @@ export class RasterCache {
     this.bytesUsed = 0;
   }
 
-  private evict(keepKeys: Set<string>) {
+  private evict(keepKeys: ReadonlySet<string>) {
     while (this.bytesUsed > this.maxBytes && this.entriesMap.size > 0) {
       const oldest = this.entriesMap.keys().next().value;
       if (!oldest) return;

@@ -35,7 +35,7 @@ export declare class RasterCache {
         sourceWidth?: number;
         sourceHeight?: number;
         dpiRounded?: number;
-    }): void;
+    }, protectedKeys?: ReadonlySet<string>): void;
     delete(key: string): void;
     keys(): string[];
     values(): CachedRaster[];
