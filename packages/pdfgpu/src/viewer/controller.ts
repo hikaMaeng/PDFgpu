@@ -495,7 +495,12 @@ class PdfGpuViewerControllerImpl implements PdfGpuViewerController {
       viewportTop: this.viewport.scrollTop,
       viewportHeight: this.viewport.clientHeight,
       qualityDpi: this.currentBucketDpi,
-      sourceScale: this.currentBucketDpi / (BASE_PREVIEW_DPI * this.baseScale)
+      // `page.width`/`page.height` are already layout dimensions and include
+      // the current zoom. Detail raster coordinates, however, are in the
+      // provider's native DPI space. Do not divide by baseScale here: doing
+      // so makes the tile grid stop short of the page whenever zoom > 1 and
+      // leaves the uncovered area showing the low-resolution preview.
+      sourceScale: this.currentBucketDpi / BASE_PREVIEW_DPI
     });
 
     const tasksToRun = this.toRenderTaskList(tasks);

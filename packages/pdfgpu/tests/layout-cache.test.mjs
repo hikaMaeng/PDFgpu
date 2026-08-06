@@ -213,6 +213,30 @@ describe('texture cache', () => {
     assert.deepEqual(previewPages, [1, 0, 2]);
   });
 
+  it('covers the full zoomed page with detail tiles', () => {
+    const layout = {
+      pagePositions: [
+        { index: 0, top: 0, height: 1267, width: 979 }
+      ],
+      totalHeight: 1267
+    };
+    const queue = buildRenderQueue({
+      layout,
+      pageCount: 1,
+      visiblePages: [0],
+      activePage: 0,
+      viewportTop: 0,
+      viewportHeight: 700,
+      qualityDpi: 192,
+      // 1267x979 is a 1.2x zoomed 1056x816 preview page. The provider
+      // raster is still 2x the unzoomed preview dimensions.
+      sourceScale: 2
+    });
+    const detail = queue.filter((item) => item.kind === 'detail');
+    assert.equal(detail.some((item) => item.tileY >= 1536), true);
+    assert.equal(detail.some((item) => item.tileX >= 1024), true);
+  });
+
   it('orders distant visible neighbors after detail workload', () => {
     const layout = {
       pagePositions: [
