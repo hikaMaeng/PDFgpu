@@ -32,6 +32,8 @@ const DEFAULT_OVERSCAN_PAGES = 2;
 const DEFAULT_ZOOM_STEP = 1.1;
 const BASE_PREVIEW_DPI = 96;
 const DEFAULT_DETAIL_DPI = 192;
+const LOAD_PARSE_PROGRESS = 35;
+const LOAD_PARSE_TRANSITION_MS = 900;
 const MAX_PENDING_QUEUE_TASKS = 96;
 const INTERACTION_IDLE_MS = 140;
 
@@ -107,6 +109,7 @@ class PdfGpuViewerControllerImpl implements PdfGpuViewerController {
   private pageGap = DEFAULT_PAGE_GAP;
   private spreadGap = DEFAULT_SPREAD_GAP;
   private rafId: number | null = null;
+  private loadProgressRafId: number | null = null;
 
   constructor(options: PdfGpuViewerOptions) {
     this.container = options.container;
@@ -322,6 +325,10 @@ class PdfGpuViewerControllerImpl implements PdfGpuViewerController {
       cancelAnimationFrame(this.rafId);
       this.rafId = null;
     }
+    if (this.loadProgressRafId !== null) {
+      cancelAnimationFrame(this.loadProgressRafId);
+      this.loadProgressRafId = null;
+    }
     if (this.queueIdleTimerId !== null) {
       window.clearTimeout(this.queueIdleTimerId);
       this.queueIdleTimerId = null;
@@ -369,6 +376,10 @@ class PdfGpuViewerControllerImpl implements PdfGpuViewerController {
   private async loadInternal(source: PdfDocumentSource): Promise<void> {
     this.assertAlive();
     this.cancelQueue();
+    if (this.loadProgressRafId !== null) {
+      cancelAnimationFrame(this.loadProgressRafId);
+      this.loadProgressRafId = null;
+    }
     this.cache.clear();
     this.clearShells();
     this.state.loading = true;
@@ -413,8 +424,8 @@ class PdfGpuViewerControllerImpl implements PdfGpuViewerController {
       this.state.pageCount = manifest.pageCount;
       this.state.loadPageCount = manifest.pageCount;
       this.state.loadPhase = 'rendering';
-      this.state.loadProgress = 35;
       this.state.loadProgressDeterminate = true;
+      this.animateLoadProgressTo(LOAD_PARSE_PROGRESS);
       this.rebuildLayout();
       this.activePageIndex = manifest.pageCount > 0 ? 0 : undefined;
       this.state.activePage = this.activePageIndex !== undefined ? this.activePageIndex + 1 : undefined;
@@ -427,6 +438,7 @@ class PdfGpuViewerControllerImpl implements PdfGpuViewerController {
         this.state.loading = false;
         this.state.loadPhase = 'idle';
         this.state.loadProgress = 0;
+        this.state.loadProgressDeterminate = false;
         this.notify();
         return;
       }
@@ -824,11 +836,41 @@ class PdfGpuViewerControllerImpl implements PdfGpuViewerController {
     if (this.state.loadPhase !== 'rendering' || this.initialPreviewPages.size === 0) return;
     const loadedPages = [...this.initialPreviewPages].filter((pageIndex) => this.pageHasPreview(pageIndex)).length;
     this.state.loadedPages = loadedPages;
-    this.state.loadProgress = Math.min(99, 35 + Math.round((loadedPages / this.initialPreviewPages.size) * 65));
+    if (this.state.loadProgress < LOAD_PARSE_PROGRESS) return;
+    this.state.loadProgress = Math.min(99, LOAD_PARSE_PROGRESS + Math.round((loadedPages / this.initialPreviewPages.size) * (100 - LOAD_PARSE_PROGRESS)));
     if (loadedPages >= this.initialPreviewPages.size) {
       this.state.loadProgress = 100;
       this.state.loadPhase = 'ready';
     }
+  }
+
+  private animateLoadProgressTo(target: number): void {
+    if (this.loadProgressRafId !== null) {
+      cancelAnimationFrame(this.loadProgressRafId);
+      this.loadProgressRafId = null;
+    }
+    const start = this.state.loadProgress;
+    if (start >= target) {
+      this.state.loadProgress = target;
+      this.updateLoadProgress();
+      this.notify();
+      return;
+    }
+    const startedAt = performance.now();
+    const tick = (now: number) => {
+      if (this.disposed) return;
+      const ratio = Math.min(1, (now - startedAt) / LOAD_PARSE_TRANSITION_MS);
+      this.state.loadProgress = Math.round(start + (target - start) * ratio);
+      this.notify();
+      if (ratio < 1) {
+        this.loadProgressRafId = requestAnimationFrame(tick);
+      } else {
+        this.loadProgressRafId = null;
+        this.updateLoadProgress();
+        this.notify();
+      }
+    };
+    this.loadProgressRafId = requestAnimationFrame(tick);
   }
 
   private pageHasDetail(pageIndex: number): boolean {
