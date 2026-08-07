@@ -36,9 +36,9 @@ const corePackage = readJson('packages/pdfgpu/package.json');
 const appPackage = readJson('apps/pdfgpu/package.json');
 const clientPackage = readJson('apps/pdfgpu/src/client/package.json');
 const serverPackage = readJson('apps/pdfgpu/src/server/package.json');
-const installedPdfiumPackage = readJson('packages/pdfgpu/node_modules/@embedpdf/pdfium/package.json');
+const installedPdfiumPackage = readJson('node_modules/@embedpdf/pdfium/package.json');
 const expectedPdfium = contract.pdfium;
-const lockfile = readText('pnpm-lock.yaml');
+const lockfile = readJson('package-lock.json');
 const engineSource = readText('packages/pdfgpu/src/engine/pdfiumEngine.ts');
 
 requireEqual('contract PDFgpu version', contract.pdfgpuVersion, rootPackage.version);
@@ -56,30 +56,11 @@ requireMatch('PDFium package version', expectedPdfium.packageVersion, /^\d+\.\d+
 requireEqual('installed PDFium package name', installedPdfiumPackage.name, expectedPdfium.packageName);
 requireEqual('installed PDFium package version', installedPdfiumPackage.version, expectedPdfium.packageVersion);
 
-const importerStart = lockfile.indexOf('\n  packages/pdfgpu:\n');
-const importerEnd = lockfile.indexOf('\n\npackages:\n', importerStart);
-if (importerStart < 0 || importerEnd < 0) {
-  throw new Error('pnpm-lock.yaml is missing the packages/pdfgpu importer');
-}
-const importer = lockfile.slice(importerStart, importerEnd);
-const importerDependency = importer.match(
-  /'@embedpdf\/pdfium':\s*\n\s+specifier: ([^\n]+)\s*\n\s+version: ([^\n]+)/
-);
-if (!importerDependency) {
-  throw new Error('pnpm-lock.yaml is missing the @embedpdf/pdfium importer dependency');
-}
-requireEqual('lockfile PDFium specifier', importerDependency[1], expectedPdfium.dependencySpec);
-requireEqual('lockfile PDFium version', importerDependency[2], expectedPdfium.packageVersion);
-
-const packageResolution = lockfile.match(
-  new RegExp(
-    `\\n  '${escapeRegex(expectedPdfium.packageName)}@${escapeRegex(expectedPdfium.packageVersion)}':\\n\\s+resolution: \\{integrity: ([^}]+)\\}`
-  )
-);
-if (!packageResolution) {
-  throw new Error('pnpm-lock.yaml is missing the PDFium package resolution');
-}
-requireEqual('lockfile PDFium integrity', packageResolution[1], expectedPdfium.lockfileIntegrity);
+const lockedPdfium = lockfile.packages?.[`node_modules/${expectedPdfium.packageName}`];
+if (!lockedPdfium) throw new Error('package-lock.json is missing the @embedpdf/pdfium package');
+requireEqual('lockfile PDFium specifier', lockfile.packages['packages/pdfgpu']?.dependencies?.[expectedPdfium.packageName], expectedPdfium.dependencySpec);
+requireEqual('lockfile PDFium version', lockedPdfium.version, expectedPdfium.packageVersion);
+requireEqual('lockfile PDFium integrity', lockedPdfium.integrity, expectedPdfium.lockfileIntegrity);
 
 if (!engineSource.includes(`import('${expectedPdfium.packageName}')`)) {
   throw new Error('PDFium JavaScript module import does not match the release contract');

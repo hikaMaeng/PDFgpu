@@ -2,7 +2,7 @@ import { execSync, spawnSync } from 'node:child_process';
 import { mkdirSync, writeFileSync } from 'node:fs';
 import { resolve } from 'node:path';
 
-const BUILD_CMD = 'pnpm run build';
+const BUILD_CMD = 'npm run build';
 const COMPOSE_DOWN_CMD = 'docker compose down --remove-orphans';
 const COMPOSE_UP_CMD = 'docker compose up --build -d pdfgpu';
 const HEALTH_PATH = '/health';

@@ -2,16 +2,18 @@
   "name": "pdfgpu",
   "version": "0.1.5",
   "private": true,
+  "packageManager": "npm@11.17.0",
   "workspaces": [
-    "apps/**",
+    "apps/*",
+    "apps/*/src/*",
     "packages/*"
   ],
   "scripts": {
     "dev": "turbo dev",
-    "build": "pnpm run verify:release-contract && turbo run build",
+    "build": "npm run verify:release-contract && turbo run build",
     "start": "node apps/pdfgpu/src/server/dist/index.js",
     "deploy": "node ./scripts/deploy.mjs",
-    "test:libs": "pnpm run verify:release-contract && pnpm --recursive run test",
+    "test:libs": "npm run verify:release-contract && npm run test --workspaces --if-present",
     "verify:release-contract": "node scripts/verify-release-contract.mjs"
   },
   "devDependencies": {
