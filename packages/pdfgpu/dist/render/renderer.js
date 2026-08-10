@@ -44,6 +44,7 @@ function vertexData(tile, frameWidth, frameHeight) {
 }
 export class PageRenderer {
     constructor() {
+        this.lastFrame = null;
         this._backend = 'unsupported';
         this.initError = '';
         this.isInitialized = false;
@@ -106,6 +107,7 @@ export class PageRenderer {
         return this._backend;
     }
     render(canvas, frame) {
+        this.lastFrame = frame;
         this.frameCount += 1;
         if (this.frameCount <= 3 || this.frameCount % 60 === 0) {
             console.info('[pdfgpu] render frame', {
@@ -128,6 +130,12 @@ export class PageRenderer {
             }
         }
         this.render2d(canvas, frame);
+    }
+    renderLastFrameToCanvas(canvas) {
+        if (!this.lastFrame)
+            return false;
+        this.render2d(canvas, this.lastFrame);
+        return true;
     }
     get state() {
         return this._backend;

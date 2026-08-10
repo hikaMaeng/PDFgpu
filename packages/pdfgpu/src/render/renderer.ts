@@ -80,6 +80,7 @@ function vertexData(tile: RenderedTile, frameWidth: number, frameHeight: number)
 }
 
 export class PageRenderer {
+  private lastFrame: Frame | null = null;
   private _backend: 'webgpu' | 'unsupported' | 'error' = 'unsupported';
   private initError = '';
   private isInitialized = false;
@@ -147,6 +148,7 @@ export class PageRenderer {
   }
 
   render(canvas: HTMLCanvasElement, frame: Frame): void {
+    this.lastFrame = frame;
     this.frameCount += 1;
     if (this.frameCount <= 3 || this.frameCount % 60 === 0) {
       console.info('[pdfgpu] render frame', {
@@ -170,6 +172,12 @@ export class PageRenderer {
     }
 
     this.render2d(canvas, frame);
+  }
+
+  renderLastFrameToCanvas(canvas: HTMLCanvasElement): boolean {
+    if (!this.lastFrame) return false;
+    this.render2d(canvas, this.lastFrame);
+    return true;
   }
 
   get state(): 'webgpu' | 'unsupported' | 'error' {
