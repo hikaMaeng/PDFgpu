@@ -1,4 +1,5 @@
 import { buildLayout, resolveViewportWindow, visiblePageIndices, type LayoutMetrics } from '../layout/layout.js';
+import { findPageAtViewportPoint, screenRectToAbsoluteRect } from './coordinates.js';
 import { RasterCache, cacheKey } from '../scheduler/byteBudgetCache.js';
 import { PageRenderer } from '../render/renderer.js';
 import { buildRenderQueue, type QueueRenderTask } from '../scheduler/queue.js';
@@ -10,6 +11,10 @@ import {
   type PdfGpuSpreadPlacement,
   type PdfGpuViewMode,
   type PdfGpuViewerController,
+  type PdfGpuCaptureController,
+  type PdfGpuCaptureResult,
+  type PdfGpuScreenPoint,
+  PdfGpuCaptureError,
   type PdfGpuViewerOptions,
   type PdfGpuViewerState,
   type PdfRasterProvider,
@@ -71,7 +76,7 @@ export async function createPdfGpuViewer(options: PdfGpuViewerOptions): Promise<
   return controller;
 }
 
-class PdfGpuViewerControllerImpl implements PdfGpuViewerController {
+class PdfGpuViewerControllerImpl implements PdfGpuViewerController, PdfGpuCaptureController {
   private readonly container: HTMLElement;
   private readonly engine: EngineWithQueueDepth;
   private readonly renderer: PageRenderer;
@@ -307,6 +312,34 @@ class PdfGpuViewerControllerImpl implements PdfGpuViewerController {
     );
     this.scheduleUpdate();
     this.notify();
+  }
+
+  async captureRegion(start: PdfGpuScreenPoint, end: PdfGpuScreenPoint, options: { minSize?: number; signal?: AbortSignal } = {}): Promise<PdfGpuCaptureResult> {
+    this.assertAlive();
+    const minSize = options.minSize ?? 50;
+    if (Math.abs(end.x - start.x) < minSize || Math.abs(end.y - start.y) < minSize) {
+      throw new PdfGpuCaptureError('capture-too-small', `capture region must be at least ${minSize}x${minSize}px`);
+    }
+    const page = findPageAtViewportPoint(this.layout, start, this.viewport.scrollTop);
+    const endPage = findPageAtViewportPoint(this.layout, end, this.viewport.scrollTop);
+    if (!page || !endPage || page.index !== endPage.index) throw new PdfGpuCaptureError('invalid-coordinates', 'capture region must stay within one page');
+    const manifestPage = this.manifest?.pages[page.index];
+    if (!manifestPage) throw new PdfGpuCaptureError('invalid-coordinates', 'page is not available');
+    const dpi = Math.max(this.detailDpi, 192);
+    const rect = screenRectToAbsoluteRect(page, start, end, this.viewport.scrollTop, manifestPage.widthPts, manifestPage.heightPts);
+    if (rect.width <= 0 || rect.height <= 0) throw new PdfGpuCaptureError('invalid-coordinates', 'capture region is empty');
+    if (this.state.renderQuality === 'preview') throw new PdfGpuCaptureError('high-resolution-not-ready', 'high-resolution page is still loading');
+    const raster = await this.engine.renderTile({ pageIndex: page.index, dpi, tileX: 0, tileY: 0, tileWidth: Math.ceil(manifestPage.widthPts * dpi / 72), tileHeight: Math.ceil(manifestPage.heightPts * dpi / 72), signal: options.signal });
+    if (options.signal?.aborted) throw new DOMException('capture aborted', 'AbortError');
+    const canvas = document.createElement('canvas');
+    const scale = dpi / 72;
+    canvas.width = Math.max(1, Math.round(rect.width * scale));
+    canvas.height = Math.max(1, Math.round(rect.height * scale));
+    const context = canvas.getContext('2d');
+    if (!context) throw new PdfGpuCaptureError('high-resolution-not-ready', 'capture canvas is unavailable');
+    context.drawImage(raster.source as CanvasImageSource, Math.round(rect.x * scale), Math.round(rect.y * scale), canvas.width, canvas.height, 0, 0, canvas.width, canvas.height);
+    const dataUrl = canvas.toDataURL('image/png');
+    return { pageIndex: page.index, rect, imageBase64: dataUrl.slice(dataUrl.indexOf(',') + 1), mimeType: 'image/png', quality: 'high-resolution', dpi };
   }
 
   getState(): PdfGpuViewerState {

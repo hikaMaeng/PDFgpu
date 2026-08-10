@@ -123,7 +123,7 @@ export interface PdfGpuViewerState {
   activePage?: number;
 }
 
-export interface PdfGpuViewerController {
+export interface PdfGpuViewerController extends PdfGpuCaptureController {
   load(source: PdfDocumentSource): Promise<void>;
   setZoom(value: number): void;
   zoomIn(): void;
