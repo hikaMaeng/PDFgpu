@@ -182,7 +182,11 @@ export class PageRenderer {
 
   renderLastPreviewFrameToCanvas(canvas: HTMLCanvasElement): boolean {
     if (!this.lastFrame) return false;
-    const previewTiles = this.lastFrame.tiles.filter((tile) => imageSize(tile.source).width <= 1024);
+    const previewTiles = this.lastFrame.tiles.filter((tile) => {
+      const { width, height } = imageSize(tile.source);
+      return width > 0 && height > 0 && width * height <= 1_500_000;
+    });
+    if (!previewTiles.length) return false;
     this.render2d(canvas, { ...this.lastFrame, tiles: previewTiles });
     return true;
   }
