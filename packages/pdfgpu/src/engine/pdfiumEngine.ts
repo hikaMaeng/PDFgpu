@@ -363,8 +363,8 @@ class PdfiumWorker {
     try {
       const tileX = clamp(Math.floor(request.tileX), 0, Math.max(0, pageWidth - 1));
       const tileY = clamp(Math.floor(request.tileY), 0, Math.max(0, pageHeight - 1));
-      const tileWidth = Math.max(1, Math.min(TILE_SIZE, pageWidth - tileX));
-      const tileHeight = Math.max(1, Math.min(TILE_SIZE, pageHeight - tileY));
+      const tileWidth = Math.max(1, Math.min(request.tileWidth, pageWidth - tileX));
+      const tileHeight = Math.max(1, Math.min(request.tileHeight, pageHeight - tileY));
       const source = await createBitmapImage(
         this.pdfium,
         pagePtr,
