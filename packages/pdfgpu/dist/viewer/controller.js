@@ -1,5 +1,5 @@
 import { buildLayout, resolveViewportWindow, visiblePageIndices } from '../layout/layout.js';
-import { findPageAtViewportPoint, screenRectToAbsoluteRect } from './coordinates.js';
+import { findPageAtViewportPoint, projectOverlaysForVisiblePages, screenRectToAbsoluteRect } from './coordinates.js';
 import { RasterCache, cacheKey } from '../scheduler/byteBudgetCache.js';
 import { PageRenderer } from '../render/renderer.js';
 import { buildRenderQueue } from '../scheduler/queue.js';
@@ -359,6 +359,9 @@ class PdfGpuViewerControllerImpl {
         }
         const dataUrl = canvas.toDataURL('image/png');
         return { pageIndex: page.index, rect, imageBase64: dataUrl.slice(dataUrl.indexOf(',') + 1), mimeType: 'image/png', quality: 'high-resolution', dpi };
+    }
+    projectOverlays(overlays) {
+        return projectOverlaysForVisiblePages(this.layout, overlays, this.state.visiblePages, this.viewport.scrollTop);
     }
     getState() {
         return this.snapshot;

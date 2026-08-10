@@ -118,6 +118,7 @@ export interface PdfGpuViewerController extends PdfGpuCaptureController {
     fitHeight(): void;
     fitPage(): void;
     scrollToPage(index: number): void;
+    projectOverlays(overlays: PdfGpuOverlayItem[]): PdfGpuOverlayProjection[];
     getState(): PdfGpuViewerState;
     subscribe(listener: (state: PdfGpuViewerState) => void): () => void;
     dispose(): void;

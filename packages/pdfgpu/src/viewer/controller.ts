@@ -1,5 +1,5 @@
 import { buildLayout, resolveViewportWindow, visiblePageIndices, type LayoutMetrics } from '../layout/layout.js';
-import { findPageAtViewportPoint, screenRectToAbsoluteRect } from './coordinates.js';
+import { findPageAtViewportPoint, projectOverlaysForVisiblePages, screenRectToAbsoluteRect } from './coordinates.js';
 import { RasterCache, cacheKey } from '../scheduler/byteBudgetCache.js';
 import { PageRenderer } from '../render/renderer.js';
 import { buildRenderQueue, type QueueRenderTask } from '../scheduler/queue.js';
@@ -13,6 +13,8 @@ import {
   type PdfGpuViewerController,
   type PdfGpuCaptureController,
   type PdfGpuCaptureResult,
+  type PdfGpuOverlayItem,
+  type PdfGpuOverlayProjection,
   type PdfGpuScreenPoint,
   PdfGpuCaptureError,
   type PdfGpuViewerOptions,
@@ -358,6 +360,10 @@ class PdfGpuViewerControllerImpl implements PdfGpuViewerController, PdfGpuCaptur
     }
     const dataUrl = canvas.toDataURL('image/png');
     return { pageIndex: page.index, rect, imageBase64: dataUrl.slice(dataUrl.indexOf(',') + 1), mimeType: 'image/png', quality: 'high-resolution', dpi };
+  }
+
+  projectOverlays(overlays: PdfGpuOverlayItem[]): PdfGpuOverlayProjection[] {
+    return projectOverlaysForVisiblePages(this.layout, overlays, this.state.visiblePages, this.viewport.scrollTop);
   }
 
   getState(): PdfGpuViewerState {
