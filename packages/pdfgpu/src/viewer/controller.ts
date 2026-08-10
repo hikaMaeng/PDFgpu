@@ -347,11 +347,11 @@ class PdfGpuViewerControllerImpl implements PdfGpuViewerController, PdfGpuCaptur
       visibleCanvas.height = previewCanvas.height;
       const visibleContext = visibleCanvas.getContext('2d');
       visibleContext?.drawImage(previewCanvas, 0, 0);
-      const viewportBox = this.viewport.getBoundingClientRect();
-      const sourceScaleX = visibleCanvas.width / Math.max(1, viewportBox.width);
-      const sourceScaleY = visibleCanvas.height / Math.max(1, viewportBox.height);
-      const sourceX = (start.x - viewportBox.left) * sourceScaleX;
-      const sourceY = (start.y - viewportBox.top) * sourceScaleY;
+      const canvasBox = this.canvas.getBoundingClientRect();
+      const sourceScaleX = visibleCanvas.width / Math.max(1, canvasBox.width);
+      const sourceScaleY = visibleCanvas.height / Math.max(1, canvasBox.height);
+      const sourceX = (start.x - canvasBox.left) * sourceScaleX;
+      const sourceY = (start.y - canvasBox.top) * sourceScaleY;
       context.fillStyle = '#ffffff';
       context.fillRect(0, 0, canvas.width, canvas.height);
       context.drawImage(visibleCanvas, sourceX, sourceY, Math.abs(end.x - start.x) * sourceScaleX, Math.abs(end.y - start.y) * sourceScaleY, 0, 0, canvas.width, canvas.height);
