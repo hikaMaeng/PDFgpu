@@ -102,7 +102,7 @@ export interface PdfGpuViewerState {
     error: string | null;
     activePage?: number;
 }
-export interface PdfGpuViewerController {
+export interface PdfGpuViewerController extends PdfGpuCaptureController {
     load(source: PdfDocumentSource): Promise<void>;
     setZoom(value: number): void;
     zoomIn(): void;
@@ -119,4 +119,52 @@ export interface PdfGpuViewerController {
     getState(): PdfGpuViewerState;
     subscribe(listener: (state: PdfGpuViewerState) => void): () => void;
     dispose(): void;
+}
+export type PdfGpuAbsoluteRect = {
+    x: number;
+    y: number;
+    width: number;
+    height: number;
+};
+export type PdfGpuScreenPoint = {
+    x: number;
+    y: number;
+};
+export type PdfGpuCaptureErrorCode = 'high-resolution-not-ready' | 'invalid-coordinates' | 'capture-too-small';
+export declare class PdfGpuCaptureError extends Error {
+    readonly code: PdfGpuCaptureErrorCode;
+    constructor(code: PdfGpuCaptureErrorCode, message: string);
+}
+export interface PdfGpuCaptureResult {
+    pageIndex: number;
+    rect: PdfGpuAbsoluteRect;
+    imageBase64: string;
+    mimeType: 'image/png' | 'image/webp';
+    quality: 'high-resolution';
+    dpi: number;
+}
+export interface PdfGpuCaptureController {
+    captureRegion(start: PdfGpuScreenPoint, end: PdfGpuScreenPoint, options?: {
+        minSize?: number;
+        signal?: AbortSignal;
+    }): Promise<PdfGpuCaptureResult>;
+}
+export interface PdfGpuOverlayItem {
+    pageIndex: number;
+    rect: PdfGpuAbsoluteRect;
+    borderColor: string;
+    fillColor?: string;
+    fillOpacity?: number;
+    comment?: string;
+}
+export interface PdfGpuOverlayProjection {
+    pageIndex: number;
+    left: number;
+    top: number;
+    width: number;
+    height: number;
+    borderColor: string;
+    fillColor?: string;
+    fillOpacity?: number;
+    comment?: string;
 }
