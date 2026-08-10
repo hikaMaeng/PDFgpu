@@ -12,6 +12,7 @@ export type Frame = {
     tiles: RenderedTile[];
 };
 export declare class PageRenderer {
+    private lastFrame;
     private _backend;
     private initError;
     private isInitialized;
@@ -27,6 +28,7 @@ export declare class PageRenderer {
     private readonly gpuTextureEntries;
     init(canvas: HTMLCanvasElement): Promise<'webgpu' | 'unsupported' | 'error'>;
     render(canvas: HTMLCanvasElement, frame: Frame): void;
+    renderLastFrameToCanvas(canvas: HTMLCanvasElement): boolean;
     get state(): 'webgpu' | 'unsupported' | 'error';
     get reason(): string;
     dispose(): void;
