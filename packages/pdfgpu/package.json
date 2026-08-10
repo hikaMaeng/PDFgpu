@@ -1,6 +1,6 @@
 {
   "name": "@pdfgpu/core",
-  "version": "0.1.7",
+  "version": "0.1.8",
   "description": "Provider-independent WebGPU PDF viewer core",
   "type": "module",
   "files": [
