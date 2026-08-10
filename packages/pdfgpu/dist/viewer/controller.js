@@ -361,7 +361,7 @@ class PdfGpuViewerControllerImpl {
         return { pageIndex: page.index, rect, imageBase64: dataUrl.slice(dataUrl.indexOf(',') + 1), mimeType: 'image/png', quality: 'high-resolution', dpi };
     }
     projectOverlays(overlays) {
-        return projectOverlaysForVisiblePages(this.layout, overlays, this.state.visiblePages, this.viewport.scrollTop);
+        return projectOverlaysForVisiblePages(this.layout, overlays, this.state.visiblePages, this.viewport.scrollTop, this.manifest?.pages.map((page) => ({ width: page.widthPts, height: page.heightPts })) ?? []);
     }
     getState() {
         return this.snapshot;

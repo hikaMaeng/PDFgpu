@@ -363,7 +363,13 @@ class PdfGpuViewerControllerImpl implements PdfGpuViewerController, PdfGpuCaptur
   }
 
   projectOverlays(overlays: PdfGpuOverlayItem[]): PdfGpuOverlayProjection[] {
-    return projectOverlaysForVisiblePages(this.layout, overlays, this.state.visiblePages, this.viewport.scrollTop);
+    return projectOverlaysForVisiblePages(
+      this.layout,
+      overlays,
+      this.state.visiblePages,
+      this.viewport.scrollTop,
+      this.manifest?.pages.map((page) => ({ width: page.widthPts, height: page.heightPts })) ?? [],
+    );
   }
 
   getState(): PdfGpuViewerState {

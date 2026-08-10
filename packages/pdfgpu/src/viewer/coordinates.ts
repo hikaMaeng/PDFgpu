@@ -3,6 +3,7 @@ import type { PdfGpuAbsoluteRect, PdfGpuOverlayItem, PdfGpuOverlayProjection } f
 
 export type PdfPageRect = { x: number; y: number; width: number; height: number };
 export type ViewportPoint = { x: number; y: number };
+export type PdfPageAbsoluteSize = { width: number; height: number };
 
 export function viewportToPageRect(page: PositionedPage, start: ViewportPoint, end: ViewportPoint, scrollTop: number): PdfPageRect {
   const left = Math.max(page.left, Math.min(start.x, end.x));
@@ -21,13 +22,20 @@ export function findPageAtViewportPoint(layout: LayoutMetrics, point: ViewportPo
   return layout.pagePositions.find((page) => point.x >= page.left && point.x <= page.left + page.width && documentY >= page.top && documentY <= page.top + page.height);
 }
 
-export function projectOverlaysForVisiblePages(layout: LayoutMetrics, overlays: PdfGpuOverlayItem[], visiblePages: readonly number[], scrollTop: number): PdfGpuOverlayProjection[] {
+export function projectOverlaysForVisiblePages(layout: LayoutMetrics, overlays: PdfGpuOverlayItem[], visiblePages: readonly number[], scrollTop: number, pageSizes: readonly PdfPageAbsoluteSize[]): PdfGpuOverlayProjection[] {
   const visible = new Set(visiblePages);
   return overlays.flatMap((item) => {
     if (!visible.has(item.pageIndex)) return [];
     const page = layout.pagePositions[item.pageIndex];
-    if (!page) return [];
-    return [{ pageIndex: item.pageIndex, ...pageRectToViewportRect(page, item.rect, scrollTop), borderColor: item.borderColor, fillColor: item.fillColor, fillOpacity: item.fillOpacity, comment: item.comment }];
+    const absoluteSize = pageSizes[item.pageIndex];
+    if (!page || !absoluteSize || absoluteSize.width <= 0 || absoluteSize.height <= 0) return [];
+    const normalized = {
+      x: item.rect.x / absoluteSize.width,
+      y: item.rect.y / absoluteSize.height,
+      width: item.rect.width / absoluteSize.width,
+      height: item.rect.height / absoluteSize.height,
+    };
+    return [{ pageIndex: item.pageIndex, ...pageRectToViewportRect(page, normalized, scrollTop), borderColor: item.borderColor, fillColor: item.fillColor, fillOpacity: item.fillOpacity, comment: item.comment }];
   });
 }
 
