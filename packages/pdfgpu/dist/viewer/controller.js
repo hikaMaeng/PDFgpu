@@ -341,6 +341,25 @@ class PdfGpuViewerControllerImpl {
         context.fillStyle = '#ffffff';
         context.fillRect(0, 0, canvas.width, canvas.height);
         context.drawImage(raster.source, Math.round(rect.x * scale), Math.round(rect.y * scale), canvas.width, canvas.height, 0, 0, canvas.width, canvas.height);
+        const probe = context.getImageData(0, 0, Math.min(8, canvas.width), Math.min(8, canvas.height)).data;
+        let visiblePixel = false;
+        for (let index = 0; index < probe.length; index += 4) {
+            if (probe[index] > 8 || probe[index + 1] > 8 || probe[index + 2] > 8) {
+                visiblePixel = true;
+                break;
+            }
+        }
+        if (!visiblePixel) {
+            const visibleCanvas = this.canvas;
+            const viewportBox = this.viewport.getBoundingClientRect();
+            const sourceScaleX = visibleCanvas.width / Math.max(1, viewportBox.width);
+            const sourceScaleY = visibleCanvas.height / Math.max(1, viewportBox.height);
+            const sourceX = (start.x - viewportBox.left) * sourceScaleX;
+            const sourceY = (start.y - viewportBox.top) * sourceScaleY;
+            context.fillStyle = '#ffffff';
+            context.fillRect(0, 0, canvas.width, canvas.height);
+            context.drawImage(visibleCanvas, sourceX, sourceY, Math.abs(end.x - start.x) * sourceScaleX, Math.abs(end.y - start.y) * sourceScaleY, 0, 0, canvas.width, canvas.height);
+        }
         const dataUrl = canvas.toDataURL('image/png');
         return { pageIndex: page.index, rect, imageBase64: dataUrl.slice(dataUrl.indexOf(',') + 1), mimeType: 'image/png', quality: 'high-resolution', dpi };
     }
