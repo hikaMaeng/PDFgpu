@@ -29,6 +29,7 @@ export declare class PageRenderer {
     init(canvas: HTMLCanvasElement): Promise<'webgpu' | 'unsupported' | 'error'>;
     render(canvas: HTMLCanvasElement, frame: Frame): void;
     renderLastFrameToCanvas(canvas: HTMLCanvasElement): boolean;
+    renderLastPreviewFrameToCanvas(canvas: HTMLCanvasElement): boolean;
     get state(): 'webgpu' | 'unsupported' | 'error';
     get reason(): string;
     dispose(): void;

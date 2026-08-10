@@ -350,7 +350,7 @@ class PdfGpuViewerControllerImpl implements PdfGpuViewerController, PdfGpuCaptur
     }
     if (!visiblePixel) {
       const visibleCanvas = document.createElement('canvas');
-      this.renderer.renderLastFrameToCanvas(visibleCanvas);
+      this.renderer.renderLastPreviewFrameToCanvas(visibleCanvas);
       const viewportBox = this.viewport.getBoundingClientRect();
       const sourceScaleX = visibleCanvas.width / Math.max(1, viewportBox.width);
       const sourceScaleY = visibleCanvas.height / Math.max(1, viewportBox.height);
