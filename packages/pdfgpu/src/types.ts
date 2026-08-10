@@ -32,6 +32,8 @@ export interface PdfDocumentManifest {
 
 export interface PdfPreviewRenderRequest {
   pageIndex: number;
+  /** Optional full-page raster DPI used by deterministic capture flows. */
+  dpi?: number;
   signal?: AbortSignal;
 }
 

@@ -329,7 +329,7 @@ class PdfGpuViewerControllerImpl {
         if (this.state.renderQuality === 'preview')
             throw new PdfGpuCaptureError('high-resolution-not-ready', 'high-resolution page is still loading');
         const scale = dpi / 72;
-        const raster = await this.engine.renderTile({ pageIndex: page.index, dpi, tileX: 0, tileY: 0, tileWidth: Math.ceil(manifestPage.widthPts * scale), tileHeight: Math.ceil(manifestPage.heightPts * scale), signal: options.signal });
+        const raster = await this.engine.renderPreview({ pageIndex: page.index, dpi, signal: options.signal });
         if (options.signal?.aborted)
             throw new DOMException('capture aborted', 'AbortError');
         const canvas = document.createElement('canvas');
@@ -342,7 +342,7 @@ class PdfGpuViewerControllerImpl {
         context.fillRect(0, 0, canvas.width, canvas.height);
         context.drawImage(raster.source, Math.round(rect.x * scale), Math.round(rect.y * scale), canvas.width, canvas.height, 0, 0, canvas.width, canvas.height);
         const previewCanvas = document.createElement('canvas');
-        if (this.renderer.renderLastPreviewFrameToCanvas(previewCanvas)) {
+        if (!hasVisiblePixels(context, canvas) && this.renderer.renderLastPreviewFrameToCanvas(previewCanvas)) {
             const visibleCanvas = document.createElement('canvas');
             visibleCanvas.width = previewCanvas.width;
             visibleCanvas.height = previewCanvas.height;
@@ -1138,4 +1138,14 @@ class PdfGpuViewerControllerImpl {
         if (this.disposed)
             throw new Error('viewer controller is disposed');
     }
+}
+function hasVisiblePixels(context, canvas) {
+    const sampleWidth = Math.min(32, canvas.width);
+    const sampleHeight = Math.min(32, canvas.height);
+    const pixels = context.getImageData(Math.max(0, Math.floor((canvas.width - sampleWidth) / 2)), Math.max(0, Math.floor((canvas.height - sampleHeight) / 2)), sampleWidth, sampleHeight).data;
+    for (let index = 0; index < pixels.length; index += 4) {
+        if (pixels[index] > 8 || pixels[index + 1] > 8 || pixels[index + 2] > 8)
+            return true;
+    }
+    return false;
 }

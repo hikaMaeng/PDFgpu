@@ -320,8 +320,10 @@ class PdfiumWorker {
     const pagePtr = this.pdfium.FPDF_LoadPage(this.requireOpen().docPtr, request.pageIndex);
     if (!pagePtr) throw new Error(`failed to load page ${request.pageIndex}`);
     try {
-      const width = roundInt(page.widthPts * PT_TO_PX_SCALE);
-      const height = roundInt(page.heightPts * PT_TO_PX_SCALE);
+      const dpi = request.dpi ?? PREVIEW_DPI;
+      const scale = dpi / 72;
+      const width = roundInt(page.widthPts * scale);
+      const height = roundInt(page.heightPts * scale);
       const source = await createBitmapImage(
         this.pdfium,
         pagePtr,
@@ -338,7 +340,7 @@ class PdfiumWorker {
         source,
         width,
         height,
-        dpi: PREVIEW_DPI,
+        dpi,
         pageIndex: request.pageIndex,
         kind: 'preview'
       };
