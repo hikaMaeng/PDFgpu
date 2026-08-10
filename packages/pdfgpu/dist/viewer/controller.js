@@ -328,17 +328,21 @@ class PdfGpuViewerControllerImpl {
             throw new PdfGpuCaptureError('invalid-coordinates', 'capture region is empty');
         if (this.state.renderQuality === 'preview')
             throw new PdfGpuCaptureError('high-resolution-not-ready', 'high-resolution page is still loading');
-        const raster = await this.engine.renderTile({ pageIndex: page.index, dpi, tileX: 0, tileY: 0, tileWidth: Math.ceil(manifestPage.widthPts * dpi / 72), tileHeight: Math.ceil(manifestPage.heightPts * dpi / 72), signal: options.signal });
+        const scale = dpi / 72;
+        const tileX = Math.max(0, Math.floor(rect.x * scale));
+        const tileY = Math.max(0, Math.floor(rect.y * scale));
+        const tileWidth = Math.max(1, Math.ceil(rect.width * scale));
+        const tileHeight = Math.max(1, Math.ceil(rect.height * scale));
+        const raster = await this.engine.renderTile({ pageIndex: page.index, dpi, tileX, tileY, tileWidth, tileHeight, signal: options.signal });
         if (options.signal?.aborted)
             throw new DOMException('capture aborted', 'AbortError');
         const canvas = document.createElement('canvas');
-        const scale = dpi / 72;
         canvas.width = Math.max(1, Math.round(rect.width * scale));
         canvas.height = Math.max(1, Math.round(rect.height * scale));
         const context = canvas.getContext('2d');
         if (!context)
             throw new PdfGpuCaptureError('high-resolution-not-ready', 'capture canvas is unavailable');
-        context.drawImage(raster.source, Math.round(rect.x * scale), Math.round(rect.y * scale), canvas.width, canvas.height, 0, 0, canvas.width, canvas.height);
+        context.drawImage(raster.source, 0, 0, raster.width, raster.height, 0, 0, canvas.width, canvas.height);
         const dataUrl = canvas.toDataURL('image/png');
         return { pageIndex: page.index, rect, imageBase64: dataUrl.slice(dataUrl.indexOf(',') + 1), mimeType: 'image/png', quality: 'high-resolution', dpi };
     }
