@@ -141,3 +141,16 @@ export interface PdfGpuViewerController {
   subscribe(listener: (state: PdfGpuViewerState) => void): () => void;
   dispose(): void;
 }
+
+export interface PdfGpuCaptureResult {
+  pageIndex: number;
+  rect: { x: number; y: number; width: number; height: number };
+  image: Blob;
+  mimeType: 'image/png' | 'image/webp';
+  quality: 'high-resolution';
+  dpi: number;
+}
+
+export interface PdfGpuCaptureController {
+  captureRegion(pageIndex: number, rect: { x: number; y: number; width: number; height: number }, options?: { dpi?: number; signal?: AbortSignal }): Promise<PdfGpuCaptureResult>;
+}

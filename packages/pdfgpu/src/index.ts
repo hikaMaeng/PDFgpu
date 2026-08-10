@@ -14,6 +14,8 @@ import type {
   PdfGpuViewerController,
   PdfGpuViewerOptions,
   PdfGpuViewerState,
+  PdfGpuCaptureResult,
+  PdfGpuCaptureController,
   PdfRasterResult,
   PdfDocumentManifest,
   PdfPageManifest,
@@ -22,6 +24,7 @@ import type {
 } from './types.js';
 
 export * from './viewer/interaction.js';
+export * from './viewer/coordinates.js';
 
 export {
   createPdfDocumentEngine,
@@ -42,4 +45,6 @@ export {
   type PdfGpuViewerController,
   type PdfGpuViewerOptions,
   type PdfGpuViewerState
+  , type PdfGpuCaptureResult
+  , type PdfGpuCaptureController
 };
