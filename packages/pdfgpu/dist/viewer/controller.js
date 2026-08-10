@@ -338,6 +338,8 @@ class PdfGpuViewerControllerImpl {
         const context = canvas.getContext('2d');
         if (!context)
             throw new PdfGpuCaptureError('high-resolution-not-ready', 'capture canvas is unavailable');
+        context.fillStyle = '#ffffff';
+        context.fillRect(0, 0, canvas.width, canvas.height);
         context.drawImage(raster.source, Math.round(rect.x * scale), Math.round(rect.y * scale), canvas.width, canvas.height, 0, 0, canvas.width, canvas.height);
         const dataUrl = canvas.toDataURL('image/png');
         return { pageIndex: page.index, rect, imageBase64: dataUrl.slice(dataUrl.indexOf(',') + 1), mimeType: 'image/png', quality: 'high-resolution', dpi };
