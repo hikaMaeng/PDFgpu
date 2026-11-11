@@ -12,6 +12,12 @@ export class RasterCache {
         this.entriesMap = new Map();
         this.bytesUsed = 0;
         this.maxBytes = options.maxBytes ?? DEFAULT_MAX_BYTES;
+        this.onRelease = options.onRelease;
+    }
+    /** Releases downstream resources for `source`, then frees the bitmap. */
+    releaseSource(source) {
+        this.onRelease?.(source);
+        closeBitmap(source);
     }
     getBytesBudget() {
         return this.maxBytes;
@@ -52,7 +58,9 @@ export class RasterCache {
         const existing = this.entriesMap.get(entry.key);
         if (existing) {
             this.bytesUsed -= existing.bytes;
-            closeBitmap(existing.source);
+            if (existing.source !== normalized.source) {
+                this.releaseSource(existing.source);
+            }
             this.entriesMap.delete(entry.key);
         }
         this.entriesMap.set(entry.key, normalized);
@@ -63,9 +71,9 @@ export class RasterCache {
         const entry = this.entriesMap.get(key);
         if (!entry)
             return;
-        closeBitmap(entry.source);
         this.entriesMap.delete(key);
         this.bytesUsed -= entry.bytes;
+        this.releaseSource(entry.source);
     }
     keys() {
         return [...this.entriesMap.keys()];
@@ -80,11 +88,12 @@ export class RasterCache {
         this.evict(keepKeys);
     }
     clear() {
-        for (const entry of this.entriesMap.values()) {
-            closeBitmap(entry.source);
-        }
+        const sources = [...this.entriesMap.values()].map((entry) => entry.source);
         this.entriesMap.clear();
         this.bytesUsed = 0;
+        for (const source of sources) {
+            this.releaseSource(source);
+        }
     }
     evict(keepKeys) {
         while (this.bytesUsed > this.maxBytes && this.entriesMap.size > 0) {

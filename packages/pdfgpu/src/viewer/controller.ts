@@ -165,7 +165,11 @@ class PdfGpuViewerControllerImpl implements PdfGpuViewerController, PdfGpuCaptur
     this.canvas = document.createElement('canvas');
 
     this.renderer = new PageRenderer();
-    this.cache = new RasterCache();
+    // GPU texture lifetime follows raster lifetime: whenever a raster leaves
+    // the cache, the texture uploaded from it is destroyed in the same step.
+    this.cache = new RasterCache({
+      onRelease: (source) => this.renderer.releaseTexture(source)
+    });
 
     const maxQueueDepth = this.engine.kind === 'in-memory' ? 1 : 3;
     this.queueDepth = clamp(1, maxQueueDepth, this.engine.queueDepth ?? 1);

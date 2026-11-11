@@ -13,6 +13,7 @@
 - 우선순위 큐 순서
 - scroll/single/double 상호작용 matrix, keyboard editable target, Ctrl+wheel zoom
 - detail 타일 격자가 zoom 0.5/1/2에서 엔진 native raster를 벗어나지 않고 layout 페이지를 빈틈 없이 덮는지 확인 (`tests/detail-tile-coverage.test.mjs`)
+- GPU 텍스처 수가 캐시 보유 raster 수를 넘지 않고, `clear`/`delete`/`dispose`에서 전부 파괴되는지 확인 (`tests/gpu-texture-release.test.mjs`, 가짜 WebGPU device)
 
 실행:
 
@@ -21,7 +22,9 @@ pnpm run verify:release-contract
 pnpm --filter @pdfgpu/core test
 ```
 
-현재 core unit test는 31개입니다. Windows에서도 패키지 소유의 TypeScript
+현재 core unit test는 35개입니다. WebGPU 경로는 Playwright 컨테이너에서
+`backend: unsupported`로 떨어지므로, 텍스처 수명은 가짜 device를 주입한 단위
+테스트로만 검증할 수 있고 브라우저 실행은 2D fallback 무회귀만 보여줍니다. Windows에서도 패키지 소유의 TypeScript
 devDependency와 `pnpm install`만으로 `dist`를 재생성할 수 있어야 하며, pack한
 tarball의 `files` 목록에는 `dist`, 문서, PDFium vendor 자산만 포함되어야 합니다.
 릴리스 계약 검증은 PDFGPU 버전, `@embedpdf/pdfium` exact dependency,

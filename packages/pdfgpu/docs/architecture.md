@@ -77,5 +77,6 @@
 ## 4) Render Layer (`render/`)
 
 - WebGPU 가능 브라우저에서는 공급자 이미지(`ImageBitmap`/canvas/image)를 GPU texture로 올리고 textured quad render pass로 합성합니다.
+- GPU texture는 raster 캐시가 그 raster를 버릴 때 함께 파괴됩니다. 캐시 생성 시 주는 `onRelease` 훅이 유일한 연결점입니다 (`docs/internals.md` GPU 텍스처 소유권).
 - WebGPU 미지원 브라우저와 CI는 동일 frame contract를 2D canvas fallback으로 검증합니다.
 - 렌더러는 PDF 문서를 열거나 파싱하지 않습니다. 입력은 이미 래스터화된 page/tile 이미지와 viewport 좌표뿐입니다.

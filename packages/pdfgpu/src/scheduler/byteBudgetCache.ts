@@ -22,6 +22,14 @@ export interface CachedRaster {
 
 export interface BitmapCacheConstructorOptions {
   maxBytes?: number;
+  /**
+   * Called once for every raster source that leaves the cache: eviction,
+   * `delete`, `clear`, and replacing an existing key. The viewer wires this to
+   * `PageRenderer.releaseTexture` so GPU texture lifetime follows the raster
+   * it was uploaded from. Without it, the renderer keeps the texture for a
+   * raster this cache has already dropped.
+   */
+  onRelease?: (source: PdfImageSource) => void;
 }
 
 const DEFAULT_MAX_BYTES = 192 * 1024 * 1024;
@@ -39,10 +47,18 @@ function closeBitmap(source: PdfImageSource) {
 export class RasterCache {
   private readonly maxBytes: number;
   private readonly entriesMap = new Map<string, CachedRaster>();
+  private readonly onRelease: ((source: PdfImageSource) => void) | undefined;
   private bytesUsed = 0;
 
   constructor(options: BitmapCacheConstructorOptions = {}) {
     this.maxBytes = options.maxBytes ?? DEFAULT_MAX_BYTES;
+    this.onRelease = options.onRelease;
+  }
+
+  /** Releases downstream resources for `source`, then frees the bitmap. */
+  private releaseSource(source: PdfImageSource) {
+    this.onRelease?.(source);
+    closeBitmap(source);
   }
 
   getBytesBudget() {
@@ -90,7 +106,9 @@ export class RasterCache {
     const existing = this.entriesMap.get(entry.key);
     if (existing) {
       this.bytesUsed -= existing.bytes;
-      closeBitmap(existing.source);
+      if (existing.source !== normalized.source) {
+        this.releaseSource(existing.source);
+      }
       this.entriesMap.delete(entry.key);
     }
 
@@ -102,9 +120,9 @@ export class RasterCache {
   delete(key: string) {
     const entry = this.entriesMap.get(key);
     if (!entry) return;
-    closeBitmap(entry.source);
     this.entriesMap.delete(key);
     this.bytesUsed -= entry.bytes;
+    this.releaseSource(entry.source);
   }
 
   keys() {
@@ -124,11 +142,12 @@ export class RasterCache {
   }
 
   clear() {
-    for (const entry of this.entriesMap.values()) {
-      closeBitmap(entry.source);
-    }
+    const sources = [...this.entriesMap.values()].map((entry) => entry.source);
     this.entriesMap.clear();
     this.bytesUsed = 0;
+    for (const source of sources) {
+      this.releaseSource(source);
+    }
   }
 
   private evict(keepKeys: ReadonlySet<string>) {

@@ -92,8 +92,25 @@ export class PageRenderer {
   private frameCanvas: HTMLCanvasElement | null = null;
   private frameContext: CanvasRenderingContext2D | null = null;
   private frameCount = 0;
-  private readonly gpuTextures = new WeakMap<PdfImageSource, GpuTextureEntry>();
-  private readonly gpuTextureEntries = new Set<GpuTextureEntry>();
+  /**
+   * GPU textures uploaded from raster sources.
+   *
+   * - key: the `PdfImageSource` object identity of a cached raster.
+   * - scope: this renderer instance; one entry per distinct raster source.
+   * - lifetime: created on first draw of that source, destroyed when the
+   *   source leaves `RasterCache` (which calls `releaseTexture`) or on
+   *   `dispose`.
+   * - bound: the raster cache's byte budget. Every source drawn in a frame is
+   *   a live cache entry, so GPU bytes track cache bytes; `gpuTextureBytes`
+   *   exposes the running total.
+   * - cleared by: `RasterCache`'s `onRelease` hook (eviction, `delete`,
+   *   `clear`, and replacing a key) and `dispose`. Nothing else removes
+   *   entries, so a missing hook is a leak, not a slow release. A `WeakMap`
+   *   cannot do this job: the entry holds `source`, so any strong list of
+   *   entries keeps every key alive.
+   */
+  private readonly gpuTextures = new Map<PdfImageSource, GpuTextureEntry>();
+  private gpuBytes = 0;
 
   async init(canvas: HTMLCanvasElement): Promise<'webgpu' | 'unsupported' | 'error'> {
     if (this.isInitialized) return this._backend;
@@ -199,11 +216,44 @@ export class PageRenderer {
     return this.initError;
   }
 
-  dispose() {
-    for (const entry of this.gpuTextureEntries) {
-      entry.texture.destroy();
+  /** Number of GPU textures currently held. */
+  get gpuTextureCount(): number {
+    return this.gpuTextures.size;
+  }
+
+  /** Bytes of GPU texture memory currently held, at 4 bytes per pixel. */
+  get gpuTextureBytes(): number {
+    return this.gpuBytes;
+  }
+
+  /**
+   * Destroys the GPU texture uploaded from `source`, if any.
+   *
+   * Called by `RasterCache` whenever a raster leaves the cache. Returns true
+   * when a texture was destroyed, so callers can account for the release.
+   */
+  releaseTexture(source: PdfImageSource): boolean {
+    const entry = this.gpuTextures.get(source);
+    if (!entry) return false;
+    this.gpuTextures.delete(source);
+    this.gpuBytes -= entry.width * entry.height * 4;
+    if (this.gpuBytes < 0) this.gpuBytes = 0;
+    entry.texture.destroy?.();
+    return true;
+  }
+
+  /** Destroys every GPU texture held by this renderer. */
+  releaseAllTextures(): void {
+    for (const entry of this.gpuTextures.values()) {
+      entry.texture.destroy?.();
     }
-    this.gpuTextureEntries.clear();
+    this.gpuTextures.clear();
+    this.gpuBytes = 0;
+  }
+
+  dispose() {
+    this.releaseAllTextures();
+    this.lastFrame = null;
     if (this.device) {
       this.device.destroy?.();
       this.device = null;
@@ -281,7 +331,7 @@ export class PageRenderer {
 
     const entry = { source, texture, width, height };
     this.gpuTextures.set(source, entry);
-    this.gpuTextureEntries.add(entry);
+    this.gpuBytes += width * height * 4;
     return entry;
   }
 

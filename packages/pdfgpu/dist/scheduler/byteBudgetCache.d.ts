@@ -19,12 +19,23 @@ export interface CachedRaster {
 }
 export interface BitmapCacheConstructorOptions {
     maxBytes?: number;
+    /**
+     * Called once for every raster source that leaves the cache: eviction,
+     * `delete`, `clear`, and replacing an existing key. The viewer wires this to
+     * `PageRenderer.releaseTexture` so GPU texture lifetime follows the raster
+     * it was uploaded from. Without it, the renderer keeps the texture for a
+     * raster this cache has already dropped.
+     */
+    onRelease?: (source: PdfImageSource) => void;
 }
 export declare class RasterCache {
     private readonly maxBytes;
     private readonly entriesMap;
+    private readonly onRelease;
     private bytesUsed;
     constructor(options?: BitmapCacheConstructorOptions);
+    /** Releases downstream resources for `source`, then frees the bitmap. */
+    private releaseSource;
     getBytesBudget(): number;
     get usedBytes(): number;
     has(key: string): boolean;

@@ -38,6 +38,21 @@ preview로 남습니다. zoom 0.5 / 1 / 2 회귀 테스트가
 - 기본 한도: `192 * 1024 * 1024` bytes
 - `keepKeys`가 지정되면 해당 키는 `prune`에서 보호
 
+## GPU 텍스처 소유권
+
+- 키: raster `source` 객체 동일성. 범위: `PageRenderer` 인스턴스 1개당 source 1개.
+- 생성: 해당 source가 프레임에 처음 그려질 때 `copyExternalImageToTexture` 1회.
+- 해제: `RasterCache`에서 그 raster가 빠질 때(축출 · `delete` · `clear` ·
+  같은 키 교체) `onRelease` 훅이 `PageRenderer.releaseTexture(source)`를
+  호출합니다. 그 밖에 해제하는 경로는 `dispose()`뿐입니다.
+- 상한: raster 캐시의 byte budget. 프레임에 그려지는 source는 모두 살아 있는
+  캐시 항목이므로 GPU 바이트가 캐시 바이트를 따라갑니다. 현재 보유량은
+  `gpuTextureCount` / `gpuTextureBytes`로 읽습니다.
+- `WeakMap`으로는 이 일을 할 수 없습니다. 엔트리가 `source`를 들고 있어서,
+  엔트리를 담는 강한 컬렉션이 하나라도 있으면 모든 키가 함께 살아남습니다.
+  이 때문에 이전 구현은 캐시가 버린 raster의 텍스처를 영구히 보유했습니다
+  (측정: raster 200개 삽입 시 생성 200 · 파괴 0 · 캐시 보유 10 → 190개 누수).
+
 ## 큐
 
 - 스크롤/줌은 입력 debounce 없이 다음 animation frame에서 즉시 viewport/window를 갱신합니다.
