@@ -32,6 +32,21 @@ const PRIORITY_DETAIL_VISIBLE_OTHER = 2000;
 const TILE_SIZE = 512;
 const PREFETCH_RADIUS = 2;
 
+/**
+ * Native/layout ratio for detail tile coordinates.
+ *
+ * Layout page dimensions already include `baseScale` (the zoom), while the
+ * engine rasters a page at `widthPts * dpi / 72` px, i.e. `BASE_PREVIEW_DPI`
+ * layout px at zoom 1 scaled by `dpi / BASE_PREVIEW_DPI`. Tile coordinates
+ * live in that native space, so the layout extent must be converted with this
+ * ratio. It is the exact inverse of the composite factor the viewer uses to
+ * place a finished tile back on the canvas (`baseScale * PREVIEW_DPI / dpi`).
+ */
+export function detailSourceScale(dpi: number, baseScale: number): number {
+  const safeScale = baseScale > 0 ? baseScale : 1;
+  return (dpi / PREVIEW_DPI) / safeScale;
+}
+
 function makePreviewTask(pageIndex: number, priority: number): QueueRenderTask {
   return {
     key: `preview/${pageIndex}/${Math.round(PREVIEW_DPI)}/0/0`,

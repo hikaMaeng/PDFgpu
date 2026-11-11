@@ -26,4 +26,4 @@ fi
 # run the local playwright test (now that @playwright/test exists under /work)
 export PLAYWRIGHT_BROWSERS_PATH=${PLAYWRIGHT_BROWSERS_PATH:-/root/.cache/ms-playwright}
 echo "Using PLAYWRIGHT_BROWSERS_PATH=${PLAYWRIGHT_BROWSERS_PATH}"
-npx playwright test tests/playwright/pdfgpu-viewer.spec.js --reporter=list
+npx playwright test --reporter=list

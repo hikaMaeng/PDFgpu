@@ -2,7 +2,7 @@ import assert from 'node:assert/strict';
 import { describe, it } from 'node:test';
 import { buildLayout, resolveViewportWindow, visiblePageIndices } from '../dist/layout/layout.js';
 import { RasterCache } from '../dist/scheduler/byteBudgetCache.js';
-import { buildRenderQueue } from '../dist/scheduler/queue.js';
+import { buildRenderQueue, detailSourceScale } from '../dist/scheduler/queue.js';
 import { normalizeDetailDpi } from '../dist/engine/dpi.js';
 
 function createBitmap() {
@@ -260,13 +260,17 @@ describe('texture cache', () => {
       viewportTop: 0,
       viewportHeight: 700,
       qualityDpi: 192,
-      // 1267x979 is a 1.2x zoomed 1056x816 preview page. The provider
-      // raster is still 2x the unzoomed preview dimensions.
-      sourceScale: 2
+      // 1267x979 is a 1.2x zoomed 1056x816 preview page. The provider raster
+      // is still 2x the unzoomed preview dimensions (1632x2112), so the
+      // native/layout ratio is (192 / 96) / 1.2, not 2: the layout extent
+      // already carries the zoom.
+      sourceScale: detailSourceScale(192, 1.2)
     });
     const detail = queue.filter((item) => item.kind === 'detail');
     assert.equal(detail.some((item) => item.tileY >= 1536), true);
     assert.equal(detail.some((item) => item.tileX >= 1024), true);
+    // 1632x2112 raster: no tile may start past its right or bottom edge.
+    assert.equal(detail.every((item) => item.tileX < 1632 && item.tileY < 2112), true);
   });
 
   it('orders distant visible neighbors after detail workload', () => {

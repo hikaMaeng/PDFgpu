@@ -12,6 +12,7 @@
 - byte-budget eviction
 - 우선순위 큐 순서
 - scroll/single/double 상호작용 matrix, keyboard editable target, Ctrl+wheel zoom
+- detail 타일 격자가 zoom 0.5/1/2에서 엔진 native raster를 벗어나지 않고 layout 페이지를 빈틈 없이 덮는지 확인 (`tests/detail-tile-coverage.test.mjs`)
 
 실행:
 
@@ -20,7 +21,7 @@ pnpm run verify:release-contract
 pnpm --filter @pdfgpu/core test
 ```
 
-현재 core unit test는 19개입니다. Windows에서도 패키지 소유의 TypeScript
+현재 core unit test는 31개입니다. Windows에서도 패키지 소유의 TypeScript
 devDependency와 `pnpm install`만으로 `dist`를 재생성할 수 있어야 하며, pack한
 tarball의 `files` 목록에는 `dist`, 문서, PDFium vendor 자산만 포함되어야 합니다.
 릴리스 계약 검증은 PDFGPU 버전, `@embedpdf/pdfium` exact dependency,
@@ -45,7 +46,16 @@ tarball의 `files` 목록에는 `dist`, 문서, PDFium vendor 자산만 포함�
 - 파일 업로드 재로딩 시 이전 문서 잔상 없음 확인
 - WebGPU 미지원 브라우저 노출 경로 확인(브라우저 환경 별도)
 
-기본 스펙은 `tests/playwright/pdfgpu-viewer.spec.js`에 명시되어 있습니다.
+- webapi 공급자의 detail 타일 요청 좌표가 zoom 1.0/1.46/2.14에서 엔진 native raster를 벗어나지 않고 격자가 raster 끝까지 닿는지 확인
+
+기본 스펙은 `tests/playwright/pdfgpu-viewer.spec.js`, 타일 좌표계 스펙은
+`tests/playwright/pdfgpu-detail-tiles.spec.js`에 있습니다. `tests/e2e/run-e2e.sh`는
+개별 스펙 대신 `testDir` 전체(`npx playwright test`)를 실행하므로 새 스펙이
+`npm run deploy` 게이트에 자동으로 포함됩니다.
+
+`countDarkPixelsFromPng(...) > 20` 같은 픽셀 합계 게이트는 타일 위치 오류, 채널
+순서 오류, 해상도 누락을 잡지 못합니다. 좌표·해상도 계약은 요청 좌표를 직접
+관측하는 스펙으로 검증합니다.
 
 ## 렌더 진단 로그
 

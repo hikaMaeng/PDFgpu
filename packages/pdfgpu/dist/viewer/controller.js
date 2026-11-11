@@ -2,7 +2,7 @@ import { buildLayout, resolveViewportWindow, visiblePageIndices } from '../layou
 import { findPageAtViewportPoint, projectOverlaysForVisiblePages, screenRectToAbsoluteRect } from './coordinates.js';
 import { RasterCache, cacheKey } from '../scheduler/byteBudgetCache.js';
 import { PageRenderer } from '../render/renderer.js';
-import { buildRenderQueue } from '../scheduler/queue.js';
+import { buildRenderQueue, detailSourceScale } from '../scheduler/queue.js';
 import { PdfGpuCaptureError } from '../types.js';
 import { normalizeDetailDpi } from '../engine/dpi.js';
 import { createViewerInteractionState, normalizeViewerPage, reduceViewerInteraction, viewerModeFromParts, } from './interaction.js';
@@ -517,12 +517,16 @@ class PdfGpuViewerControllerImpl {
             viewportTop: this.viewport.scrollTop,
             viewportHeight: this.viewport.clientHeight,
             qualityDpi: this.currentBucketDpi,
-            // `page.width`/`page.height` are already layout dimensions and include
-            // the current zoom. Detail raster coordinates, however, are in the
-            // provider's native DPI space. Do not divide by baseScale here: doing
-            // so makes the tile grid stop short of the page whenever zoom > 1 and
-            // leaves the uncovered area showing the low-resolution preview.
-            sourceScale: this.currentBucketDpi / BASE_PREVIEW_DPI
+            // `page.width`/`page.height` are layout dimensions and already include
+            // `baseScale` (the zoom). Detail tile coordinates must be in the
+            // provider's native raster space, whose page width is
+            // `widthPts * dpi / 72`. `sourceScale` is therefore the native/layout
+            // ratio: (dpi / BASE_PREVIEW_DPI) / baseScale. This is the exact inverse
+            // of the composite factor used in `applyCompositedFrame`
+            // (`baseScale * BASE_PREVIEW_DPI / entry.dpi`); dropping `baseScale`
+            // here makes the tile grid overshoot the raster at zoom > 1 (tiles the
+            // engine clamps or rejects) and stop short of the page at zoom < 1.
+            sourceScale: detailSourceScale(this.currentBucketDpi, this.baseScale)
         });
         const tasksToRun = this.toRenderTaskList(tasks);
         const desiredKeys = new Set(tasksToRun.map((task) => task.key));

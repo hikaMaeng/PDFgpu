@@ -15,6 +15,22 @@
 - controller는 reducer 상태를 `PdfGpuViewerState`로 projection하며, React나
   샘플 앱이 별도 페이지 계산을 복제하지 않습니다.
 
+## 타일 좌표계
+
+detail 타일은 **공급자의 native raster 좌표**로 요청하고, 합성할 때 layout
+좌표로 되돌립니다. 두 축척은 서로 역수여야 합니다.
+
+- layout 페이지 크기: `widthPts * 96 / 72 * baseScale` (= zoom 포함)
+- 엔진 native raster 크기: `round(widthPts * dpi / 72)` (zoom 무관)
+- 큐가 쓰는 native/layout 비율: `detailSourceScale(dpi, baseScale)` =
+  `(dpi / 96) / baseScale`
+- 합성이 쓰는 layout/native 비율: `baseScale * 96 / dpi`
+
+`baseScale`을 빼면 zoom > 1에서 타일 격자가 raster를 넘어서고(엔진이 clamp
+하거나 버리는 요청), zoom < 1에서는 페이지에 미치지 못해 남은 영역이 96 DPI
+preview로 남습니다. zoom 0.5 / 1 / 2 회귀 테스트가
+`tests/detail-tile-coverage.test.mjs`에 있습니다.
+
 ## 캐시
 
 - 키는 `kind/pageIndex/dpiBucket/tileX/tileY`
