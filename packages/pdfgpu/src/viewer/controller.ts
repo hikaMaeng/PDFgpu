@@ -172,7 +172,10 @@ class PdfGpuViewerControllerImpl implements PdfGpuViewerController, PdfGpuCaptur
       onRelease: (source) => this.renderer.releaseTexture(source)
     });
 
-    const maxQueueDepth = this.engine.kind === 'in-memory' ? 1 : 3;
+    // In-memory engines report their real parallelism: 1 for the main-thread
+    // fallback, the worker count for the PDFium worker pool. Remote providers
+    // are capped at 3 concurrent requests.
+    const maxQueueDepth = this.engine.kind === 'in-memory' ? Math.min(8, this.engine.queueDepth ?? 1) : 3;
     this.queueDepth = clamp(1, maxQueueDepth, this.engine.queueDepth ?? 1);
     this.state.queueDepth = this.queueDepth;
     this.snapshot = { ...this.state, visiblePages: [] };

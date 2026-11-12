@@ -13,7 +13,12 @@
   - `queueDepth?: number`
 
 - `createPdfDocumentEngine(options?): Promise<PdfDocumentEngine>`
-  - 브라우저 in-memory PDFium 공급자입니다.
+  - 브라우저 in-memory PDFium 공급자입니다. 기본으로 PDFium Web Worker 풀에서
+    래스터화합니다. 워커를 만들 수 없으면 메인 스레드로 내려갑니다.
+  - `options.poolSize?: number` — 워커 수. 기본 `min(4, hardwareConcurrency - 1)`,
+    1..8. 워커마다 문서 사본과 PDFium 힙을 가지므로 메모리가 비례해 늘어납니다.
+  - `options.createWorker?: () => Worker` — 워커 생성 함수. 번들러가 기본 워커
+    URL을 처리하지 못할 때 직접 지정합니다.
   - `PdfDocumentEngine`은 `PdfRasterProvider`의 호환 alias입니다.
 
 - `createInMemoryPdfRasterProvider(provider)`
@@ -67,7 +72,7 @@
   - `spreadPlacement`: 양쪽 보기에서 첫 페이지 좌우 배치
   - `fitMode`: 현재 맞춤 정책
   - `scrollMode`: 현재 스크롤 정책
-  - `queueDepth`: 실제 동시 래스터 요청 수. in-memory 공급자는 1(main thread 단일 PDFium 인스턴스), 원격 공급자는 최대 3
+  - `queueDepth`: 실제 동시 래스터 요청 수. in-memory 공급자는 워커 풀 크기(메인 스레드 fallback은 1), 원격 공급자는 최대 3
   - `renderQuality`: `'idle' | 'preview' | 'detail'`
   - `detailDpi`: 현재 detail tile 래스터 요청 DPI
   - `backend`: `'webgpu' | 'unsupported' | 'error'`

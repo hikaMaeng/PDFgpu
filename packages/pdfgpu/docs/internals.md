@@ -102,7 +102,7 @@ preview로 남습니다. zoom 0.5 / 1 / 2 회귀 테스트가
 - 가시성/활성 기준 priority를 계산해 전역 pending map에 등록합니다.
 - 큐 후보는 active page, visible pages, active 기준 ±2 preview, visible detail로 제한합니다. 전체 페이지를 순회하며 원거리 preview를 등록하지 않습니다.
 - background loader는 `queueDepth` 슬롯만큼만 공급자 IO를 실행합니다.
-- in-memory PDFium 공급자는 현재 브라우저 main thread WASM 경로이므로 viewer가 동시 실행을 1개로 제한합니다. 원격 Web API/WebSocket 공급자는 최대 3개까지 병렬 요청을 유지할 수 있습니다.
+- in-memory 공급자의 동시 실행 수는 엔진의 `queueDepth`(워커 풀 크기, 최대 8; 메인 스레드 fallback은 1)를 따릅니다. 원격 Web API/WebSocket 공급자는 최대 3개까지 병렬 요청을 유지할 수 있습니다.
 - 고속 스크롤/휠 입력 중에는 새 raster 작업을 시작하지 않습니다. 이미 가진 cache/placeholder만 움직이고, 입력이 약 140ms 동안 잠잠해지면 background loader가 다시 시작됩니다.
 - 새 스크롤/페이지 점프가 들어오면 pending map의 우선순위만 재정렬됩니다. 이미 진행 중인 작업은 완료 후 현재 visible 여부를 재평가해 화면에 합성하거나 cache에만 남깁니다.
 - pending map은 최대 96개 task만 유지합니다. 대규모 PDF에서 원거리 preview/detail이 무한히 쌓이지 않게 하기 위한 상한입니다.
@@ -122,12 +122,31 @@ preview로 남습니다. zoom 0.5 / 1 / 2 회귀 테스트가
   mapped to the opening portion of `PdfGpuViewerState.loadProgress`; without a
   total size the consumer receives an indeterminate opening state.
 - 문서 open 시 manifest(page count, page size, rotation)는 첫 PDFium document에서 한 번만 추출합니다.
-- 엔진은 PDFium document 인스턴스를 **하나만** 엽니다. 이전 구현의 "worker" 풀은
-  모두 같은 main thread WASM 인스턴스를 공유해 병렬성이 없었고, `open()`마다
-  파일 전체를 풀 크기만큼(하드웨어 48코어에서 3벌) WASM 힙에 복사했습니다.
-  `poolSize` 옵션은 호환을 위해 받지만 현재 효과가 없습니다. 실제 병렬
-  래스터화는 Web Worker마다 별도 PDFium 인스턴스가 필요하며 아직 구현되지
-  않았습니다.
+- 기본 엔진은 **워커 풀**입니다(`engine/workerPoolEngine.ts`). 워커마다 전용 Web
+  Worker(`engine/pdfiumWorkerMain.ts`)에 자기 PDFium WASM 인스턴스와 문서 사본을
+  가지므로, 풀 크기만큼 동시에 래스터화하고 래스터화는 메인 스레드에서 돌지
+  않습니다. 결과는 transfer된 `ImageBitmap`이라 `copyExternalImageToTexture`에
+  바로 씁니다.
+- 풀 크기: `poolSize` 또는 `min(4, hardwareConcurrency - 1)`, 1..8로 제한. 메모리는
+  풀 크기에 비례합니다 — 워커마다 파일 전체와 PDFium 힙을 갖습니다.
+- `open()`: 첫 워커가 manifest를 추출하고 나머지는 그 manifest를 받아 페이지를 다시
+  훑지 않습니다. 워커마다 바이트 사본을 따로 transfer합니다. 첫 워커가 열리면
+  바로 반환하고 나머지는 백그라운드에서 열며, 렌더는 현재 문서를 연 워커에만
+  배정합니다.
+- 배정: 응답을 기다리는 요청이 가장 적은 워커. 워커 안에서는 요청을 직렬로
+  처리합니다(PDFium 상태를 공유하므로).
+- 취소: 시작 전이면 워커가 건너뛰고 `AbortError`로 답합니다. 이미 렌더 중이면
+  호출자는 즉시 `AbortError`를 받고, 나중에 도착한 비트맵은 닫힙니다.
+- 워커가 `error`를 내면 그 워커의 대기 요청만 실패하고 그 워커는 배정에서
+  빠집니다. 나머지 워커는 계속 일합니다.
+- 워커를 만들 수 없으면(`Worker` 없음, CSP 등) 메인 스레드 엔진으로 내려갑니다.
+  이 경우 문서 사본은 1개이고 `queueDepth`는 1입니다.
+- 패키징: 소스는 `new Worker(new URL('./pdfiumWorkerMain.ts', import.meta.url),
+  { type: 'module' })`로 워커를 만듭니다. Vite는 실제 파일을 가리키는 경로만 워커로
+  인식하는데 앱이 이 패키지를 소스로 번들하므로 `.ts`여야 하고, `tsc`가 문자열을
+  바꾸지 않으므로 `scripts/rewrite-worker-url.mjs`가 빌드 후 `dist`의 경로를
+  `.js`로 고칩니다. 워커가 PDFium을 `import()`로 지연 로드하므로 Vite 소비자는
+  `worker: { format: 'es' }`가 필요합니다.
 
 ## 원격 공급자 프로토콜
 

@@ -13,7 +13,7 @@ The contract covers more than `package.json`:
 - the exact dependency specifier in `packages/pdfgpu/package.json`;
 - the resolved version and integrity in `pnpm-lock.yaml`;
 - the PDFium JavaScript module import;
-- the PDFium WASM asset import used by `src/engine/pdfiumEngine.ts`;
+- the PDFium WASM asset import used by `src/engine/pdfiumCore.ts` (loaded both on the main thread and inside each PDFium worker);
 - the installed PDFium package under `node_modules`;
 - the versions of the root, core, sample app, client, and server packages.
 

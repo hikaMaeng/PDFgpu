@@ -39,7 +39,7 @@ const serverPackage = readJson('apps/pdfgpu/src/server/package.json');
 const installedPdfiumPackage = readJson('node_modules/@embedpdf/pdfium/package.json');
 const expectedPdfium = contract.pdfium;
 const lockfile = readJson('package-lock.json');
-const engineSource = readText('packages/pdfgpu/src/engine/pdfiumEngine.ts');
+const engineSource = readText('packages/pdfgpu/src/engine/pdfiumCore.ts');
 
 requireEqual('contract PDFgpu version', contract.pdfgpuVersion, rootPackage.version);
 requireEqual('contract core package name', contract.corePackageName, corePackage.name);

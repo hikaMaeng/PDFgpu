@@ -52,6 +52,12 @@ const viewer = await createPdfGpuViewer({
 await viewer.load('/document.pdf');
 ```
 
+`createPdfDocumentEngine()` rasterizes in a pool of PDFium Web Workers
+(`poolSize`, default `min(4, hardwareConcurrency - 1)`); each worker holds its own
+copy of the document. With Vite, set `worker: { format: 'es' }`, because the worker
+loads PDFium with `import()`. If workers cannot be created, rendering falls back to
+the main thread.
+
 Replace the provider to move rendering to a service:
 
 ```ts

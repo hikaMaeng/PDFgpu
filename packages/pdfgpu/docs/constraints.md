@@ -3,6 +3,9 @@
 - 뷰어는 브라우저 전용입니다. Node-only 환경에서는 DOM/WebGPU 표면을 만들 수 없습니다.
 - in-memory 공급자는 Chromium PDF viewer 계열의 오픈소스 PDFium을
   WebAssembly로 빌드한 `@embedpdf/pdfium@2.14.0`을 사용합니다.
+- in-memory 공급자의 PDFium은 Web Worker에서 돕니다. 워커마다 문서 전체 사본과
+  PDFium 힙을 가지므로 메모리는 `poolSize`에 비례합니다. Vite로 번들할 때는
+  `worker: { format: 'es' }`가 필요합니다(워커가 PDFium을 `import()`로 지연 로드).
 - 원격 공급자는 HTTP 또는 WebSocket 서버가 이미 PDF 파싱과 DPI별 래스터 생성을 끝낸 이미지를 반환해야 합니다.
 - 앱 서버의 원격 공급자 엔드포인트는 프로토콜 실증용이며, 네이티브 PDF 파서가 붙은 생산 구현이 아닙니다.
 - PDF.js 폴백을 제공하지 않습니다.

@@ -24,6 +24,11 @@
 - 예기치 않은 `device.lost` 뒤 같은 캔버스에서 새 장치로 재구성·재업로드하고, 스스로
   destroy한 장치는 재구성하지 않으며, WebGPU 캔버스에 2D context를 요청하지 않는지 확인
   (`tests/gpu-device-loss.test.mjs`)
+- PDFium 워커 풀: 워커마다 바이트 사본과 첫 워커의 manifest, 동시 렌더(4 워커에서
+  최대 4개 동시)와 균등 배정, 첫 워커만 열렸을 때 조기 반환과 준비된 워커에만 배정,
+  대기 요청 취소, 늦게 온 비트맵 닫기, 워커 충돌 격리, dispose 종료, 워커 생성 실패 시
+  메인 스레드 fallback 시도 (`tests/worker-pool-engine.test.mjs`, 프로토콜을 흉내 내는
+  가짜 워커)
 
 실행:
 
@@ -32,7 +37,7 @@ pnpm run verify:release-contract
 pnpm --filter @pdfgpu/core test
 ```
 
-현재 core unit test는 46개입니다. 배포 리포트 파서 테스트 3개는 저장소 루트의
+현재 core unit test는 55개입니다. 배포 리포트 파서 테스트 3개는 저장소 루트의
 `tests/scripts/deploy-report.test.mjs`에 있습니다(`node --test tests/scripts/*.test.mjs`).
 
 WebGPU 경로는 Playwright 컨테이너에서 `backend: unsupported`로 떨어집니다.

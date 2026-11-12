@@ -1,41 +1,7 @@
-import { FPDF_REVERSE_BYTE_ORDER, pdfiumRgbxToRgba } from './pixels.js';
 import { normalizeDetailDpi } from './dpi.js';
-const PREVIEW_DPI = 96;
-const TILE_SIZE = 512;
-// PDFium writes R, G, B, x with this flag; see engine/pixels.ts.
-const RENDER_FLAGS = FPDF_REVERSE_BYTE_ORDER;
-const WHITE = 0xffffffff;
-const PT_TO_PX_SCALE = 96 / 72;
-const ROTATE_TO_FLAG = {
-    0: 0,
-    90: 1,
-    180: 2,
-    270: 3
-};
-function clamp(value, min, max) {
-    return Math.max(min, Math.min(max, value));
-}
-function roundInt(value) {
-    return Math.max(1, Math.round(value));
-}
-function normalizeRotation(rawRotation) {
-    const normalized = ((rawRotation % 360) + 360) % 360;
-    return normalized === 90 || normalized === 180 || normalized === 270 ? normalized : 0;
-}
-function rotateFlag(rawRotation) {
-    return ROTATE_TO_FLAG[normalizeRotation(rawRotation)] ?? 0;
-}
-function isBrowserEnvironment() {
-    return (typeof window !== 'undefined' &&
-        typeof navigator !== 'undefined' &&
-        typeof fetch !== 'undefined');
-}
-function assertNotAborted(signal) {
-    if (signal?.aborted) {
-        throw new DOMException('render aborted', 'AbortError');
-    }
-}
-async function sourceToBytes(source, onProgress) {
+import { clamp, ensurePdfium, PdfiumDocument, TILE_SIZE } from './pdfiumCore.js';
+import { WorkerPoolPdfEngine } from './workerPoolEngine.js';
+export async function sourceToBytes(source, onProgress) {
     const reportComplete = (length) => onProgress?.({ loadedBytes: length, totalBytes: length, ratio: 1 });
     if (source instanceof Uint8Array) {
         reportComplete(source.byteLength);
@@ -90,251 +56,82 @@ async function sourceToBytes(source, onProgress) {
     }
     throw new Error('unsupported source type');
 }
-function extractManifest(pdfium, docPtr) {
-    const pageCount = pdfium.FPDF_GetPageCount(docPtr);
-    const pages = [];
-    for (let pageIndex = 0; pageIndex < pageCount; pageIndex += 1) {
-        const pagePtr = pdfium.FPDF_LoadPage(docPtr, pageIndex);
-        if (!pagePtr) {
-            throw new Error(`failed to inspect page ${pageIndex}`);
-        }
-        try {
-            const rawWidth = pdfium.FPDF_GetPageWidthF(pagePtr);
-            const rawHeight = pdfium.FPDF_GetPageHeightF(pagePtr);
-            const rawRotation = pdfium.EPDF_GetPageRotationByIndex(docPtr, pageIndex);
-            const rotation = normalizeRotation(rawRotation);
-            const widthPts = rotation === 90 || rotation === 270 ? rawHeight : rawWidth;
-            const heightPts = rotation === 90 || rotation === 270 ? rawWidth : rawHeight;
-            pages.push({
-                index: pageIndex,
-                widthPts,
-                heightPts,
-                rotation
-            });
-        }
-        finally {
-            pdfium.FPDF_ClosePage(pagePtr);
-        }
-    }
-    return pages;
+const MAX_POOL_SIZE = 8;
+function defaultPoolSize() {
+    const hardware = typeof navigator !== 'undefined' ? navigator.hardwareConcurrency || 2 : 2;
+    return clamp(hardware - 1, 1, 4);
 }
-let pdfiumShared = null;
-async function ensurePdfium() {
-    if (pdfiumShared)
-        return pdfiumShared;
-    if (!isBrowserEnvironment()) {
-        throw new Error('PDFium engine is browser-only');
-    }
-    pdfiumShared = Promise.all([
-        import('@embedpdf/pdfium'),
-        import('@embedpdf/pdfium/pdfium.wasm?url')
-    ]).then(async ([raw, wasmAsset]) => {
-        const pdfiumModule = raw;
-        const response = await fetch(wasmAsset.default);
-        const wasmBinary = await response.arrayBuffer();
-        const wrapped = await pdfiumModule.init({ wasmBinary });
-        wrapped.PDFiumExt_Init();
-        return wrapped;
+function defaultCreateWorker() {
+    return new Worker(new URL('./pdfiumWorkerMain.js', import.meta.url), {
+        type: 'module',
+        name: 'pdfgpu-pdfium'
     });
-    try {
-        return await pdfiumShared;
-    }
-    catch (error) {
-        pdfiumShared = null;
-        throw error;
-    }
 }
-async function createBitmapImage(pdfium, pagePtr, bitmapWidth, bitmapHeight, startX, startY, renderWidth, renderHeight, rotate) {
-    const targetBitmapWidth = roundInt(bitmapWidth);
-    const targetBitmapHeight = roundInt(bitmapHeight);
-    const bitmapPtr = pdfium.FPDFBitmap_Create(targetBitmapWidth, targetBitmapHeight, 0);
-    if (!bitmapPtr)
-        throw new Error('failed to allocate bitmap');
-    try {
-        pdfium.FPDFBitmap_FillRect(bitmapPtr, 0, 0, targetBitmapWidth, targetBitmapHeight, WHITE);
-        pdfium.FPDF_RenderPageBitmap(bitmapPtr, pagePtr, startX, startY, roundInt(renderWidth), roundInt(renderHeight), rotate, RENDER_FLAGS);
-        const bufferPtr = pdfium.FPDFBitmap_GetBuffer(bitmapPtr);
-        if (!bufferPtr)
-            throw new Error('failed to read rendered buffer');
-        const bytesPerPixel = 4;
-        const byteCount = targetBitmapWidth * targetBitmapHeight * bytesPerPixel;
-        const sourceBytes = new Uint8ClampedArray(new ArrayBuffer(byteCount));
-        sourceBytes.set(pdfium.pdfium.HEAPU8.subarray(bufferPtr, bufferPtr + byteCount));
-        const imageData = new ImageData(pdfiumRgbxToRgba(sourceBytes), targetBitmapWidth, targetBitmapHeight);
-        return await createImageBitmap(imageData);
-    }
-    finally {
-        pdfium.FPDFBitmap_Destroy(bitmapPtr);
-    }
-}
-class PdfiumWorker {
-    constructor(pdfium) {
-        this.pdfium = pdfium;
-        this.loaded = null;
-        this.currentManifest = null;
-    }
-    async open(bytes, manifest) {
-        await this.dispose();
-        const dataPtr = this.pdfium.pdfium.wasmExports.malloc(bytes.length);
-        if (!dataPtr)
-            throw new Error('failed to allocate source bytes');
-        this.pdfium.pdfium.HEAPU8.set(bytes, dataPtr);
-        const docPtr = this.pdfium.FPDF_LoadMemDocument(dataPtr, bytes.length, null);
-        if (!docPtr) {
-            this.pdfium.pdfium.wasmExports.free(dataPtr);
-            throw new Error('failed to open document');
-        }
-        this.loaded = { docPtr, filePtr: dataPtr };
-        this.currentManifest = manifest ?? (() => {
-            const pages = extractManifest(this.pdfium, docPtr);
-            return { pageCount: pages.length, pages };
-        })();
-        return this.currentManifest;
-    }
-    async renderPreview(request) {
-        assertNotAborted(request.signal);
-        const page = this.currentManifest?.pages[request.pageIndex];
-        if (!page)
-            throw new Error(`invalid page index: ${request.pageIndex}`);
-        const pagePtr = this.pdfium.FPDF_LoadPage(this.requireOpen().docPtr, request.pageIndex);
-        if (!pagePtr)
-            throw new Error(`failed to load page ${request.pageIndex}`);
+export async function createPdfDocumentEngine(options = {}) {
+    const poolSize = clamp(Math.round(options.poolSize ?? defaultPoolSize()), 1, MAX_POOL_SIZE);
+    const createWorker = options.createWorker
+        ?? (typeof Worker !== 'undefined' ? defaultCreateWorker : null);
+    if (createWorker) {
         try {
-            const dpi = request.dpi ?? PREVIEW_DPI;
-            const scale = dpi / 72;
-            const width = roundInt(page.widthPts * scale);
-            const height = roundInt(page.heightPts * scale);
-            const source = await createBitmapImage(this.pdfium, pagePtr, width, height, 0, 0, width, height, rotateFlag(page.rotation));
-            assertNotAborted(request.signal);
-            return {
-                source,
-                width,
-                height,
-                dpi,
-                pageIndex: request.pageIndex,
-                kind: 'preview'
-            };
+            return await WorkerPoolPdfEngine.create({ createWorker, size: poolSize, loadBytes: sourceToBytes });
         }
-        finally {
-            this.pdfium.FPDF_ClosePage(pagePtr);
+        catch (error) {
+            console.warn('[pdfgpu] pdfium workers unavailable; rendering on the main thread', error);
         }
     }
-    async renderTile(request) {
-        assertNotAborted(request.signal);
-        const page = this.currentManifest?.pages[request.pageIndex];
-        if (!page)
-            throw new Error(`invalid page index: ${request.pageIndex}`);
-        const scale = request.dpi / 72;
-        const pageWidth = roundInt(page.widthPts * scale);
-        const pageHeight = roundInt(page.heightPts * scale);
-        const pagePtr = this.pdfium.FPDF_LoadPage(this.requireOpen().docPtr, request.pageIndex);
-        if (!pagePtr)
-            throw new Error(`failed to load page ${request.pageIndex}`);
-        try {
-            const tileX = clamp(Math.floor(request.tileX), 0, Math.max(0, pageWidth - 1));
-            const tileY = clamp(Math.floor(request.tileY), 0, Math.max(0, pageHeight - 1));
-            const tileWidth = Math.max(1, Math.min(request.tileWidth, pageWidth - tileX));
-            const tileHeight = Math.max(1, Math.min(request.tileHeight, pageHeight - tileY));
-            const source = await createBitmapImage(this.pdfium, pagePtr, tileWidth, tileHeight, -tileX, -tileY, pageWidth, pageHeight, rotateFlag(page.rotation));
-            assertNotAborted(request.signal);
-            return {
-                source,
-                width: tileWidth,
-                height: tileHeight,
-                dpi: request.dpi,
-                pageIndex: request.pageIndex,
-                kind: 'detail',
-                tileX,
-                tileY,
-                tileWidth,
-                tileHeight
-            };
-        }
-        finally {
-            this.pdfium.FPDF_ClosePage(pagePtr);
-        }
-    }
-    async dispose() {
-        if (!this.loaded)
-            return;
-        const { docPtr, filePtr } = this.loaded;
-        this.loaded = null;
-        this.currentManifest = null;
-        this.pdfium.FPDF_CloseDocument(docPtr);
-        this.pdfium.pdfium.wasmExports.free(filePtr);
-    }
-    requireOpen() {
-        if (!this.loaded || !this.currentManifest) {
-            throw new Error('document is not opened');
-        }
-        return this.loaded;
-    }
-}
-export async function createPdfDocumentEngine(_options = {}) {
     const pdfium = await ensurePdfium();
-    return new PdfDocumentEngineImpl(pdfium, 1);
+    return new MainThreadPdfEngine(pdfium);
 }
-class PdfDocumentEngineImpl {
-    constructor(pdfium, queueDepth) {
+/**
+ * Fallback engine: one PDFium document on the main thread. Rendering blocks
+ * the main thread, so the viewer runs at most one raster task at a time.
+ */
+class MainThreadPdfEngine {
+    constructor(pdfium) {
         this.kind = 'in-memory';
+        this.queueDepth = 1;
         this.manifest = null;
         this.generation = 0;
-        this.detailTileSize = TILE_SIZE;
-        this._queueDepth = queueDepth;
-        this.workers = Array.from({ length: queueDepth }, () => new PdfiumWorker(pdfium));
+        this.document = new PdfiumDocument(pdfium);
     }
     async open(source, onProgress) {
         this.generation += 1;
         const token = this.generation;
         const bytes = await sourceToBytes(source, onProgress);
-        const primary = this.workers[0];
-        if (!primary)
-            throw new Error('PDFium worker pool is empty');
-        const primaryManifest = await primary.open(bytes);
-        const manifests = [primaryManifest];
-        for (let index = 1; index < this.workers.length; index += 1) {
-            manifests.push(await this.workers[index].open(bytes, primaryManifest));
-        }
+        const manifest = await this.document.open(bytes);
         if (token !== this.generation) {
-            await this.dispose();
+            await this.document.dispose();
             throw new DOMException('open aborted', 'AbortError');
         }
-        this.manifest = manifests[0] ?? null;
-        return this.manifest;
+        this.manifest = manifest;
+        return manifest;
     }
     async renderPreview(request) {
-        if (!this.manifest)
-            throw new Error('document not opened');
-        if (request.pageIndex < 0 || request.pageIndex >= this.manifest.pageCount) {
-            throw new Error(`invalid page index: ${request.pageIndex}`);
-        }
-        const worker = this.selectWorker(request.pageIndex);
-        return worker.renderPreview(request);
+        this.assertPage(request.pageIndex);
+        return this.document.renderPreview(request);
     }
     async renderTile(request) {
-        if (!this.manifest)
-            throw new Error('document not opened');
-        if (request.pageIndex < 0 || request.pageIndex >= this.manifest.pageCount) {
-            throw new Error(`invalid page index: ${request.pageIndex}`);
-        }
-        const task = {
-            ...request,
-            dpi: normalizeDetailDpi(request.dpi),
-            tileWidth: request.tileWidth ?? this.detailTileSize,
-            tileHeight: request.tileHeight ?? this.detailTileSize
-        };
-        const worker = this.selectWorker(request.pageIndex);
-        return worker.renderTile(task);
+        this.assertPage(request.pageIndex);
+        return this.document.renderTile(normalizeTileRequest(request));
     }
     async dispose() {
         this.generation += 1;
         this.manifest = null;
-        await Promise.all(this.workers.map((worker) => worker.dispose()));
+        await this.document.dispose();
     }
-    get queueDepth() {
-        return this._queueDepth;
+    assertPage(pageIndex) {
+        if (!this.manifest)
+            throw new Error('document not opened');
+        if (pageIndex < 0 || pageIndex >= this.manifest.pageCount) {
+            throw new Error(`invalid page index: ${pageIndex}`);
+        }
     }
-    selectWorker(pageIndex) {
-        return this.workers[Math.abs(pageIndex) % this.workers.length];
-    }
+}
+export function normalizeTileRequest(request) {
+    return {
+        ...request,
+        dpi: normalizeDetailDpi(request.dpi),
+        tileWidth: request.tileWidth ?? TILE_SIZE,
+        tileHeight: request.tileHeight ?? TILE_SIZE
+    };
 }

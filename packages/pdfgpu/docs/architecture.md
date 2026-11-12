@@ -32,7 +32,7 @@
 ## 1) Provider Layer (`engine/`, `providers/`)
 
 - `PdfRasterProvider`는 PDF 파싱/래스터 공급 경계를 소유합니다.
-- in-memory 공급자: `createPdfDocumentEngine()`이 `@embedpdf/pdfium` WASM을 브라우저에서 지연 로드합니다.
+- in-memory 공급자: `createPdfDocumentEngine()`이 PDFium Web Worker 풀을 띄우고, 워커마다 `@embedpdf/pdfium` WASM을 지연 로드해 문서 사본을 엽니다. 래스터는 transfer된 `ImageBitmap`으로 메인 스레드에 돌아옵니다. 워커를 만들 수 없으면 메인 스레드 단일 인스턴스로 동작합니다.
 - HTTP 공급자: `createWebApiPdfRasterProvider(endpoint)`가 원격 API에 PDF bytes를 업로드하고 preview/detail 이미지를 요청합니다.
 - WebSocket 공급자: `createWebSocketPdfRasterProvider(endpoint)`가 동일 계약을 JSON RPC로 수행합니다.
 - 공통 렌더 API:
