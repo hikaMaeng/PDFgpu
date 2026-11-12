@@ -1,7 +1,7 @@
 import assert from 'node:assert/strict';
 import { describe, it } from 'node:test';
 import { captureSourceRect } from '../dist/viewer/capture.js';
-import { createWebApiPdfRasterProvider } from '../dist/index.js';
+import { createWebApiPdfRasterProvider, createWebSocketPdfRasterProvider } from '../dist/index.js';
 
 // External criterion: the definition of DPI. One inch is 72 PDF points and
 // `dpi` raster pixels, so a region starting 1 inch (72pt) into a page sits
@@ -54,5 +54,16 @@ describe('remote preview requests carry the requested dpi', () => {
     const preview = urls.find((url) => url.includes('/preview?'));
     assert.ok(preview, `no preview request among ${JSON.stringify(urls)}`);
     assert.equal(new URL(preview).searchParams.get('dpi'), '192');
+  });
+});
+
+describe('remote provider concurrency', () => {
+  // docs/api.md: queueDepth "원격 공급자는 최대 3"; the viewer reads it from the
+  // provider and defaulted to 1 when the built-in providers did not declare it.
+  it('declares three concurrent requests for both built-in remote providers', () => {
+    assert.equal(createWebApiPdfRasterProvider('http://test/api').queueDepth, 3);
+    const ws = createWebSocketPdfRasterProvider('ws://test/ws');
+    assert.equal(ws.queueDepth, 3);
+    ws.dispose();
   });
 });

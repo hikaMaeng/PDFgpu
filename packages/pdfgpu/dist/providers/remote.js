@@ -14,6 +14,12 @@ export function createWebSocketPdfRasterProvider(endpoint) {
 class WebApiPdfRasterProvider {
     constructor(endpoint) {
         this.kind = 'webapi';
+        /**
+         * Concurrent raster requests the viewer may keep in flight. Without it the
+         * viewer defaulted to 1, so the documented "up to 3" for remote providers
+         * never happened (Chrome status showed QueueDepth: 1).
+         */
+        this.queueDepth = 3;
         this.documentId = null;
         this.endpoint = endpoint.replace(/\/+$/, '');
     }
@@ -68,6 +74,12 @@ class WebApiPdfRasterProvider {
 class WebSocketPdfRasterProvider {
     constructor(endpoint) {
         this.kind = 'websocket';
+        /**
+         * Concurrent raster requests the viewer may keep in flight. Without it the
+         * viewer defaulted to 1, so the documented "up to 3" for remote providers
+         * never happened (Chrome status showed QueueDepth: 1).
+         */
+        this.queueDepth = 3;
         this.documentId = null;
         this.socketPromise = null;
         this.sequence = 0;

@@ -110,6 +110,14 @@ preview로 남습니다. zoom 0.5 / 1 / 2 회귀 테스트가
 - 스프레드 행은 두 배치 모두 [1], [2,3], [4,5], …(1 기준)입니다. `normalizeViewerPage`는
   double 모드에서 페이지를 그 행의 첫 페이지로 보냅니다(1, 2, 4, 6, …). 이전 규칙(홀수가
   행 선두)은 3페이지를 행 [2,3]의 오른쪽에 착지시키고 2페이지를 1로 되돌렸습니다.
+- 스프레드 첫 페이지는 두 배치 모두 2페이지 행 폭의 한 슬롯에 놓입니다(first-left는 왼쪽
+  열, first-right는 오른쪽 열). 이전에는 first-left가 페이지를 가운데에 놓았습니다.
+- page 모드의 현재 페이지: 컨트롤러는 자기 이동(`scrollToPage`)이 남긴 scrollTop을 기준점으로
+  기억합니다. scrollTop이 그와 1px 넘게 다르면 사용자가 스크롤바 등으로 움직인 것이므로 가운데
+  페이지를 따라갑니다. 마지막 행처럼 가운데로 올 수 없는 위치도 이동 결과는 그대로 유지됩니다.
+  이전에는 스크롤바로 2~3페이지를 봐도 상태가 8에 남고 PageDown이 10으로 갔습니다.
+- fit width/height/page는 viewport의 client 크기에서 padding을 뺀 콘텐츠 영역으로 계산합니다.
+  이전에는 padding만큼(데모 앱 위아래 6px) 페이지가 넘쳤습니다.
 - 키보드: 컨트롤러가 viewport `keydown`을 reducer로 보냅니다. `single`/`double`에서
   PageUp/PageDown/화살표가 페이지 이동이 되고, `scroll`에서는 가로채지 않아 브라우저의
   기본 스크롤이 동작합니다. 편집 가능한 대상의 키와 Ctrl/Alt/Meta 조합은 무시합니다.

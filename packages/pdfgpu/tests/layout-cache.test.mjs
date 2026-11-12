@@ -46,6 +46,18 @@ describe('layout calculations', () => {
     assert.deepEqual(windowPageIndices(layout.pagePositions, window), [0, 1, 2]);
   });
 
+  it('puts the first spread page in the left or right slot of a two-page row', () => {
+    // architecture.md: spread "2페이지 row를 구성하고 첫 페이지를 왼쪽/오른쪽 슬롯 중 하나에
+    // 배치". The slots are the columns that the following two-page rows use.
+    const map = new Map([0, 1, 2, 3, 4].map((i) => [i, { baseWidth: 500, baseHeight: 700 }]));
+    for (const [placement, column] of [['first-left', 1], ['first-right', 2]]) {
+      const { pagePositions } = buildLayout(5, map, 1, 16, { viewMode: 'spread', spreadPlacement: placement, viewportWidth: 1600, spreadGap: 20 });
+      const first = pagePositions.find((p) => p.index === 0);
+      const sameColumn = pagePositions.find((p) => p.index === column); // row [2,3] in 1-based: page 2 left, page 3 right
+      assert.equal(first.left, sameColumn.left, `${placement}: page 1 is not in the ${placement === 'first-left' ? 'left' : 'right'} slot`);
+    }
+  });
+
   it('counts as visible only the pages that intersect the viewport', () => {
     // Pages are 700px tall with a 16px gap: page 0 = 0..700, page 1 = 716..1416,
     // page 2 = 1432..2132. A 600px viewport at scrollTop 650 spans 650..1250, so by

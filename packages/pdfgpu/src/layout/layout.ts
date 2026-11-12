@@ -132,13 +132,16 @@ export function buildLayout(
     let index = 0;
     if (pageCount > 0) {
       const page = scaledPage(pageSizes, 0, fallbackHeight, zoom);
-      const rowWidth = spreadPlacement === 'first-right' ? page.width * 2 + gap : page.width;
+      // The first page sits alone in one slot of a full two-page row, so it lines
+      // up with the left or right column of every following row. 'first-left' used
+      // to centre the page instead of putting it in the left slot.
+      const rowWidth = page.width * 2 + gap;
       totalWidth = Math.max(totalWidth, rowWidth);
       positions.push({
         index: 0,
         left: spreadPlacement === 'first-right'
           ? centeredLeft(viewportWidth, rowWidth) + page.width + gap
-          : centeredLeft(viewportWidth, page.width),
+          : centeredLeft(viewportWidth, rowWidth),
         top: cursor,
         height: page.height,
         width: page.width,

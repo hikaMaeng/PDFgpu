@@ -50,6 +50,13 @@ class PdfGpuViewerControllerImpl {
         this.visiblePages = [];
         /** Pages in the overscan window; shells stay laid out for these while scrolling. */
         this.windowPages = [];
+        /**
+         * Page modes only: scrollTop that the viewer itself last set (navigation) or
+         * last followed. A different scrollTop means the user moved the view.
+         * - scope: this controller; lifetime: reset to null on load and on mode
+         *   change, set by `scrollToPage` and by `renderCycle`; bound: one number.
+         */
+        this.pageModeAnchorScrollTop = null;
         this.initialPreviewPages = new Set();
         this.pendingLayout = false;
         this.queuePumpScheduled = false;
@@ -75,9 +82,27 @@ class PdfGpuViewerControllerImpl {
                 this.initialPreviewPages = new Set(this.visiblePages);
                 this.updateLoadProgress();
             }
-            const active = this.interaction.mode === 'scroll'
-                ? this.chooseActivePage(this.visiblePages, window)
-                : this.interaction.page - 1;
+            // Page modes navigate by page, but the scrollbar can still move the view.
+            // If the scroll position is no longer the one our own navigation left,
+            // the user moved it: follow the page at the centre. Otherwise keep the
+            // navigated page (the last row cannot be centred, so "page at centre"
+            // alone would mislabel it). Chrome before the fix: dragged to pages 2-3
+            // while the state said 8, and PageDown went to 10.
+            const current = this.interaction.page - 1;
+            let active = current;
+            if (this.interaction.mode === 'scroll') {
+                active = this.chooseActivePage(this.visiblePages, window);
+            }
+            else {
+                const scrollTop = this.viewport.scrollTop;
+                if (this.pageModeAnchorScrollTop === null) {
+                    this.pageModeAnchorScrollTop = scrollTop;
+                }
+                else if (Math.abs(scrollTop - this.pageModeAnchorScrollTop) > 1) {
+                    active = this.chooseActivePage(this.visiblePages, window) ?? current;
+                    this.pageModeAnchorScrollTop = scrollTop;
+                }
+            }
             const normalizedActive = active === undefined
                 ? undefined
                 : normalizeViewerPage(active + 1, this.manifest.pageCount, this.interaction.mode) - 1;
@@ -343,6 +368,8 @@ class PdfGpuViewerControllerImpl {
         this.activePageIndex = target;
         this.state.activePage = targetPage;
         this.viewport.scrollTop = Math.max(0, position.top + position.height / 2 - (this.viewport.clientHeight || 1) / 2);
+        // Read back: the browser clamps at the end of the document.
+        this.pageModeAnchorScrollTop = this.viewport.scrollTop;
         this.scheduleUpdate();
         this.notify();
     }
@@ -473,6 +500,7 @@ class PdfGpuViewerControllerImpl {
         this.state.loadedPages = 0;
         this.state.loadPageCount = 0;
         this.initialPreviewPages.clear();
+        this.pageModeAnchorScrollTop = null;
         this.state.error = null;
         this.state.renderQuality = 'preview';
         this.visiblePages = [];
@@ -1059,17 +1087,34 @@ class PdfGpuViewerControllerImpl {
         this.scheduleUpdate();
         this.notify();
     }
+    /**
+     * Space a fitted page can use: the viewport's client box minus its padding.
+     * `clientWidth`/`clientHeight` include padding, so fitting to them made a
+     * page overflow by the padding (measured in Chrome: the demo app's 6px
+     * top/bottom padding left 7px of a fit-height page below the fold).
+     */
+    viewportContentBox() {
+        const style = typeof getComputedStyle === 'function' ? getComputedStyle(this.viewport) : null;
+        const px = (value) => {
+            const parsed = Number.parseFloat(value ?? '');
+            return Number.isFinite(parsed) ? parsed : 0;
+        };
+        const padX = style ? px(style.paddingLeft) + px(style.paddingRight) : 0;
+        const padY = style ? px(style.paddingTop) + px(style.paddingBottom) : 0;
+        return {
+            width: Math.max(1, this.viewport.clientWidth - padX),
+            height: Math.max(1, this.viewport.clientHeight - padY)
+        };
+    }
     computeFitWidthZoom() {
         if (!this.pageSizes.length || !this.viewport.clientWidth)
             return this.state.zoom;
-        const viewportWidth = Math.max(1, this.viewport.clientWidth);
-        return viewportWidth / this.intrinsicMaxRowWidth();
+        return this.viewportContentBox().width / this.intrinsicMaxRowWidth();
     }
     computeFitHeightZoom() {
         if (!this.pageSizes.length || !this.viewport.clientHeight)
             return this.state.zoom;
-        const viewportHeight = Math.max(1, this.viewport.clientHeight);
-        return viewportHeight / this.intrinsicMaxRowHeight();
+        return this.viewportContentBox().height / this.intrinsicMaxRowHeight();
     }
     intrinsicMaxRowWidth() {
         if (this.state.viewMode === 'single') {
@@ -1078,9 +1123,8 @@ class PdfGpuViewerControllerImpl {
         const spreadGap = this.spreadGap;
         let maxWidth = 1;
         if (this.pageSizes[0]) {
-            maxWidth = Math.max(maxWidth, this.state.spreadPlacement === 'first-right'
-                ? this.pageSizes[0].width * 2 + spreadGap
-                : this.pageSizes[0].width);
+            // The first page occupies one slot of a two-page row in both placements.
+            maxWidth = Math.max(maxWidth, this.pageSizes[0].width * 2 + spreadGap);
         }
         for (let index = 1; index < this.pageSizes.length; index += 2) {
             const left = this.pageSizes[index];
@@ -1185,6 +1229,7 @@ class PdfGpuViewerControllerImpl {
         this.viewport.dataset.pdfgpuViewport = 'true';
     }
     syncInteractionMode() {
+        this.pageModeAnchorScrollTop = null;
         this.interaction = reduceViewerInteraction(this.interaction, {
             type: 'setMode',
             mode: viewerModeFromParts(this.state.scrollMode, this.state.viewMode),

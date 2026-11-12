@@ -54,6 +54,12 @@ export function createWebSocketPdfRasterProvider(endpoint: string): PdfRasterPro
 
 class WebApiPdfRasterProvider implements PdfRasterProvider {
   readonly kind = 'webapi' as const;
+  /**
+   * Concurrent raster requests the viewer may keep in flight. Without it the
+   * viewer defaulted to 1, so the documented "up to 3" for remote providers
+   * never happened (Chrome status showed QueueDepth: 1).
+   */
+  readonly queueDepth = 3;
   readonly endpoint: string;
   private documentId: string | null = null;
 
@@ -114,6 +120,12 @@ class WebApiPdfRasterProvider implements PdfRasterProvider {
 
 class WebSocketPdfRasterProvider implements PdfRasterProvider {
   readonly kind = 'websocket' as const;
+  /**
+   * Concurrent raster requests the viewer may keep in flight. Without it the
+   * viewer defaulted to 1, so the documented "up to 3" for remote providers
+   * never happened (Chrome status showed QueueDepth: 1).
+   */
+  readonly queueDepth = 3;
   readonly endpoint: string;
   private documentId: string | null = null;
   private socketPromise: Promise<WebSocket> | null = null;

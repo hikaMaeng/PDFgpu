@@ -107,6 +107,13 @@ class PdfGpuViewerControllerImpl implements PdfGpuViewerController, PdfGpuCaptur
   private visiblePages: number[] = [];
   /** Pages in the overscan window; shells stay laid out for these while scrolling. */
   private windowPages: number[] = [];
+  /**
+   * Page modes only: scrollTop that the viewer itself last set (navigation) or
+   * last followed. A different scrollTop means the user moved the view.
+   * - scope: this controller; lifetime: reset to null on load and on mode
+   *   change, set by `scrollToPage` and by `renderCycle`; bound: one number.
+   */
+  private pageModeAnchorScrollTop: number | null = null;
   private initialPreviewPages = new Set<number>();
   private pendingLayout = false;
   private queuePumpScheduled = false;
@@ -328,6 +335,8 @@ class PdfGpuViewerControllerImpl implements PdfGpuViewerController, PdfGpuCaptur
       0,
       position.top + position.height / 2 - (this.viewport.clientHeight || 1) / 2,
     );
+    // Read back: the browser clamps at the end of the document.
+    this.pageModeAnchorScrollTop = this.viewport.scrollTop;
     this.scheduleUpdate();
     this.notify();
   }
@@ -465,6 +474,7 @@ class PdfGpuViewerControllerImpl implements PdfGpuViewerController, PdfGpuCaptur
     this.state.loadedPages = 0;
     this.state.loadPageCount = 0;
     this.initialPreviewPages.clear();
+    this.pageModeAnchorScrollTop = null;
     this.state.error = null;
     this.state.renderQuality = 'preview';
     this.visiblePages = [];
@@ -550,9 +560,25 @@ class PdfGpuViewerControllerImpl implements PdfGpuViewerController, PdfGpuCaptur
       this.initialPreviewPages = new Set(this.visiblePages);
       this.updateLoadProgress();
     }
-    const active = this.interaction.mode === 'scroll'
-      ? this.chooseActivePage(this.visiblePages, window)
-      : this.interaction.page - 1;
+    // Page modes navigate by page, but the scrollbar can still move the view.
+    // If the scroll position is no longer the one our own navigation left,
+    // the user moved it: follow the page at the centre. Otherwise keep the
+    // navigated page (the last row cannot be centred, so "page at centre"
+    // alone would mislabel it). Chrome before the fix: dragged to pages 2-3
+    // while the state said 8, and PageDown went to 10.
+    const current = this.interaction.page - 1;
+    let active: number | undefined = current;
+    if (this.interaction.mode === 'scroll') {
+      active = this.chooseActivePage(this.visiblePages, window);
+    } else {
+      const scrollTop = this.viewport.scrollTop;
+      if (this.pageModeAnchorScrollTop === null) {
+        this.pageModeAnchorScrollTop = scrollTop;
+      } else if (Math.abs(scrollTop - this.pageModeAnchorScrollTop) > 1) {
+        active = this.chooseActivePage(this.visiblePages, window) ?? current;
+        this.pageModeAnchorScrollTop = scrollTop;
+      }
+    }
     const normalizedActive = active === undefined
       ? undefined
       : normalizeViewerPage(active + 1, this.manifest.pageCount, this.interaction.mode) - 1;
@@ -1121,16 +1147,34 @@ class PdfGpuViewerControllerImpl implements PdfGpuViewerController, PdfGpuCaptur
     this.notify();
   }
 
+  /**
+   * Space a fitted page can use: the viewport's client box minus its padding.
+   * `clientWidth`/`clientHeight` include padding, so fitting to them made a
+   * page overflow by the padding (measured in Chrome: the demo app's 6px
+   * top/bottom padding left 7px of a fit-height page below the fold).
+   */
+  private viewportContentBox(): { width: number; height: number } {
+    const style = typeof getComputedStyle === 'function' ? getComputedStyle(this.viewport) : null;
+    const px = (value: string | undefined) => {
+      const parsed = Number.parseFloat(value ?? '');
+      return Number.isFinite(parsed) ? parsed : 0;
+    };
+    const padX = style ? px(style.paddingLeft) + px(style.paddingRight) : 0;
+    const padY = style ? px(style.paddingTop) + px(style.paddingBottom) : 0;
+    return {
+      width: Math.max(1, this.viewport.clientWidth - padX),
+      height: Math.max(1, this.viewport.clientHeight - padY)
+    };
+  }
+
   private computeFitWidthZoom(): number {
     if (!this.pageSizes.length || !this.viewport.clientWidth) return this.state.zoom;
-    const viewportWidth = Math.max(1, this.viewport.clientWidth);
-    return viewportWidth / this.intrinsicMaxRowWidth();
+    return this.viewportContentBox().width / this.intrinsicMaxRowWidth();
   }
 
   private computeFitHeightZoom(): number {
     if (!this.pageSizes.length || !this.viewport.clientHeight) return this.state.zoom;
-    const viewportHeight = Math.max(1, this.viewport.clientHeight);
-    return viewportHeight / this.intrinsicMaxRowHeight();
+    return this.viewportContentBox().height / this.intrinsicMaxRowHeight();
   }
 
   private intrinsicMaxRowWidth(): number {
@@ -1140,12 +1184,8 @@ class PdfGpuViewerControllerImpl implements PdfGpuViewerController, PdfGpuCaptur
     const spreadGap = this.spreadGap;
     let maxWidth = 1;
     if (this.pageSizes[0]) {
-      maxWidth = Math.max(
-        maxWidth,
-        this.state.spreadPlacement === 'first-right'
-          ? this.pageSizes[0].width * 2 + spreadGap
-          : this.pageSizes[0].width
-      );
+      // The first page occupies one slot of a two-page row in both placements.
+      maxWidth = Math.max(maxWidth, this.pageSizes[0].width * 2 + spreadGap);
     }
     for (let index = 1; index < this.pageSizes.length; index += 2) {
       const left = this.pageSizes[index];
@@ -1306,6 +1346,7 @@ class PdfGpuViewerControllerImpl implements PdfGpuViewerController, PdfGpuCaptur
   }
 
   private syncInteractionMode() {
+    this.pageModeAnchorScrollTop = null;
     this.interaction = reduceViewerInteraction(this.interaction, {
       type: 'setMode',
       mode: viewerModeFromParts(this.state.scrollMode, this.state.viewMode),

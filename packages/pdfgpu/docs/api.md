@@ -72,7 +72,7 @@
   - `spreadPlacement`: 양쪽 보기에서 첫 페이지 좌우 배치
   - `fitMode`: 현재 맞춤 정책
   - `scrollMode`: 현재 스크롤 정책
-  - `queueDepth`: 실제 동시 래스터 요청 수. in-memory 공급자는 워커 풀 크기(메인 스레드 fallback은 1), 원격 공급자는 최대 3
+  - `queueDepth`: 실제 동시 래스터 요청 수. in-memory 공급자는 워커 풀 크기(메인 스레드 fallback은 1), 원격 공급자는 3(내장 Web API/WebSocket 공급자가 `queueDepth = 3`을 선언)
   - `renderQuality`: `'idle' | 'preview' | 'detail'`
   - `detailDpi`: 현재 detail tile 래스터 요청 DPI
   - `backend`: `'webgpu' | 'unsupported' | 'error'`

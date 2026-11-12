@@ -93,3 +93,61 @@ test('visible pages are the pages that intersect the viewer', async ({ page }) =
   expect(onScreen.length).toBeGreaterThan(0);
   expect(reported).toEqual(onScreen);
 });
+
+test('page mode follows the view after the scrollbar moves it', async ({ page }) => {
+  const status = await openSample(page);
+  const region = page.getByRole('region', { name: 'PDF viewer' });
+  await page.getByLabel('scroll mode').selectOption('page');
+  await region.focus();
+  for (let i = 0; i < 7; i += 1) await page.keyboard.press('PageDown');
+  await expect(status).toContainText(/Pages:\s*8\s*\/\s*12/);
+
+  // Move the view the way dragging the scrollbar to the top does: scrollTop
+  // changes, no key or wheel event reaches the viewer.
+  await region.evaluate((el) => { el.scrollTop = 0; });
+  await expect(status).toContainText(/Pages:\s*1\s*\/\s*12/);
+  await region.focus();
+  await page.keyboard.press('PageDown');
+  await expect(status).toContainText(/Pages:\s*2\s*\/\s*12/);
+});
+
+test('fit height and fit page show the whole page inside the viewer', async ({ page }) => {
+  await openSample(page);
+  const region = page.getByRole('region', { name: 'PDF viewer' });
+  for (const name of ['fit height', 'fit page']) {
+    await page.getByRole('button', { name, exact: true }).click();
+    await page.waitForTimeout(600);
+    const fits = await region.evaluate((el) => {
+      const box = el.getBoundingClientRect();
+      const shell = el.querySelector('[data-testid="pdfgpu-page-shell"][data-page-index="0"]').getBoundingClientRect();
+      return { top: shell.top - box.top, bottom: box.top + el.clientHeight - shell.bottom, height: shell.height, client: el.clientHeight };
+    });
+    console.log(`[fit] ${name}: ${JSON.stringify(fits)}`);
+    expect(fits.top).toBeGreaterThanOrEqual(0);
+    expect(fits.bottom).toBeGreaterThanOrEqual(-1);
+  }
+});
+
+test('page mode follows a scroll that leaves the old row partly visible', async ({ page }) => {
+  const status = await openSample(page);
+  const region = page.getByRole('region', { name: 'PDF viewer' });
+  await page.getByLabel('scroll mode').selectOption('page');
+  await page.getByLabel('view mode').selectOption('spread');
+  await region.focus();
+  for (let i = 0; i < 3; i += 1) await page.keyboard.press('PageDown');
+  await expect(status).toContainText(/Pages:\s*6\s*\/\s*12/);
+  // Scroll up by half a viewport: row (6,7) stays partly on screen, but the
+  // centre is now row (4,5), as after a short scrollbar drag.
+  await region.evaluate((el) => { el.scrollTop -= el.clientHeight * 0.9; });
+  const centre = await region.evaluate((el) => {
+    const box = el.getBoundingClientRect();
+    const mid = box.top + el.clientHeight / 2;
+    return [...el.querySelectorAll('[data-testid="pdfgpu-page-shell"]')]
+      .filter((s) => { const r = s.getBoundingClientRect(); return r.top <= mid && r.bottom >= mid; })
+      .map((s) => Number(s.dataset.pageIndex) + 1).sort((a, b) => a - b)[0];
+  });
+  await expect(status).toContainText(`Pages: ${centre} / 12`);
+  await region.focus();
+  await page.keyboard.press('PageDown');
+  await expect(status).toContainText(`Pages: ${centre + 2} / 12`);
+});
