@@ -1,7 +1,9 @@
+import { FPDF_REVERSE_BYTE_ORDER, pdfiumRgbxToRgba } from './pixels.js';
 import { normalizeDetailDpi } from './dpi.js';
 const PREVIEW_DPI = 96;
 const TILE_SIZE = 512;
-const RENDER_FLAGS = 16;
+// PDFium writes R, G, B, x with this flag; see engine/pixels.ts.
+const RENDER_FLAGS = FPDF_REVERSE_BYTE_ORDER;
 const WHITE = 0xffffffff;
 const PT_TO_PX_SCALE = 96 / 72;
 const ROTATE_TO_FLAG = {
@@ -15,16 +17,6 @@ function clamp(value, min, max) {
 }
 function roundInt(value) {
     return Math.max(1, Math.round(value));
-}
-function pdfiumBgraToRgba(sourceBytes) {
-    const rgba = new Uint8ClampedArray(new ArrayBuffer(sourceBytes.length));
-    for (let index = 0; index < sourceBytes.length; index += 4) {
-        rgba[index] = sourceBytes[index + 2];
-        rgba[index + 1] = sourceBytes[index + 1];
-        rgba[index + 2] = sourceBytes[index];
-        rgba[index + 3] = 255;
-    }
-    return rgba;
 }
 function normalizeRotation(rawRotation) {
     const normalized = ((rawRotation % 360) + 360) % 360;
@@ -168,7 +160,7 @@ async function createBitmapImage(pdfium, pagePtr, bitmapWidth, bitmapHeight, sta
         const byteCount = targetBitmapWidth * targetBitmapHeight * bytesPerPixel;
         const sourceBytes = new Uint8ClampedArray(new ArrayBuffer(byteCount));
         sourceBytes.set(pdfium.pdfium.HEAPU8.subarray(bufferPtr, bufferPtr + byteCount));
-        const imageData = new ImageData(pdfiumBgraToRgba(sourceBytes), targetBitmapWidth, targetBitmapHeight);
+        const imageData = new ImageData(pdfiumRgbxToRgba(sourceBytes), targetBitmapWidth, targetBitmapHeight);
         return await createImageBitmap(imageData);
     }
     finally {
@@ -278,11 +270,9 @@ class PdfiumWorker {
         return this.loaded;
     }
 }
-export async function createPdfDocumentEngine(options = {}) {
-    const hardware = typeof navigator !== 'undefined' ? navigator.hardwareConcurrency || 4 : 4;
-    const poolSize = clamp(Math.min(3, Math.max(1, (options.poolSize ?? hardware - 1))), 1, 3);
+export async function createPdfDocumentEngine(_options = {}) {
     const pdfium = await ensurePdfium();
-    return new PdfDocumentEngineImpl(pdfium, poolSize);
+    return new PdfDocumentEngineImpl(pdfium, 1);
 }
 class PdfDocumentEngineImpl {
     constructor(pdfium, queueDepth) {

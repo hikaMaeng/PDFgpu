@@ -28,7 +28,7 @@ type RemoteImageResponse = {
 
 type RpcRequest =
   | { id: string; method: 'open'; payload: { bytes: string } }
-  | { id: string; method: 'renderPreview'; payload: { documentId: string; pageIndex: number } }
+  | { id: string; method: 'renderPreview'; payload: { documentId: string; pageIndex: number; dpi?: number } }
   | { id: string; method: 'renderTile'; payload: { documentId: string; pageIndex: number; dpi: number; tileX: number; tileY: number; tileWidth: number; tileHeight: number } };
 
 type RpcResponse =
@@ -76,6 +76,10 @@ class WebApiPdfRasterProvider implements PdfRasterProvider {
   async renderPreview(request: PdfPreviewRenderRequest): Promise<PdfRasterResult> {
     const documentId = this.requireDocumentId();
     const query = new URLSearchParams({ pageIndex: String(request.pageIndex) });
+    // Forward the requested resolution; capture asks for >= 192 DPI. The
+    // server may still answer at another dpi, so consumers must read the
+    // raster's actual size (see viewer/capture.ts).
+    if (request.dpi !== undefined) query.set('dpi', String(request.dpi));
     const response = await fetch(`${this.endpoint}/documents/${encodeURIComponent(documentId)}/preview?${query}`, {
       signal: request.signal
     });
@@ -130,7 +134,11 @@ class WebSocketPdfRasterProvider implements PdfRasterProvider {
   async renderPreview(request: PdfPreviewRenderRequest): Promise<PdfRasterResult> {
     const response = await this.rpc<RemoteImageResponse>({
       method: 'renderPreview',
-      payload: { documentId: this.requireDocumentId(), pageIndex: request.pageIndex }
+      payload: {
+        documentId: this.requireDocumentId(),
+        pageIndex: request.pageIndex,
+        ...(request.dpi !== undefined ? { dpi: request.dpi } : {})
+      }
     }, request.signal);
     return remoteImageToRaster(response);
   }

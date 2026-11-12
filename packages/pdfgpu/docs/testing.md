@@ -17,6 +17,10 @@
 - 프레임이 쌓여도 `createBuffer`/`createBindGroup`/`createView` 호출이 늘지 않고,
   타일마다 공유 정점 버퍼의 제 몫(`firstVertex`)에 올바른 clip 좌표가 쓰이는지 확인
   (`tests/gpu-frame-allocations.test.mjs`, 호출을 세는 가짜 WebGPU device)
+- 캡처가 요청 dpi가 아니라 반환 raster의 실제 해상도로 원본 영역을 자르고, 원격
+  preview 요청에 dpi가 실리는지 확인 (`tests/capture-source-rect.test.mjs`)
+- PDFium `FPDF_REVERSE_BYTE_ORDER` 출력(R,G,B,x)이 그대로 R,G,B,255가 되는지 확인
+  (`tests/pdfium-pixels.test.mjs`)
 
 실행:
 
@@ -25,12 +29,16 @@ pnpm run verify:release-contract
 pnpm --filter @pdfgpu/core test
 ```
 
-현재 core unit test는 38개입니다.
+현재 core unit test는 43개입니다. 배포 리포트 파서 테스트 3개는 저장소 루트의
+`tests/scripts/deploy-report.test.mjs`에 있습니다(`node --test tests/scripts/*.test.mjs`).
 
 WebGPU 경로는 Playwright 컨테이너에서 `backend: unsupported`로 떨어집니다.
 compose의 `e2e` 서비스에 GPU가 전달되지 않기 때문이며(`playwright.config.js`는
 `--enable-unsafe-webgpu` 등을 이미 넘기고 있습니다), 따라서 **배포 e2e 통과는 2D
-fallback 무회귀만 뜻합니다**. `renderWebGpu`는 그 컨테이너에서 한 줄도 실행되지
+fallback 무회귀만 뜻합니다**. 배포 리포트는 이 사실을 직접 적습니다: `WebGPU path:` 줄이
+Playwright가 전달한 `[pdfgpu] render frame {... backend: X}` 로그를 세어
+`NOT exercised` / `exercised` / `unknown`을 기록합니다. 뷰어는 프레임 1~3과 매
+60프레임만 로그하므로 이 수는 "로그된 프레임" 수입니다. `renderWebGpu`는 그 컨테이너에서 한 줄도 실행되지
 않습니다.
 
 실제 WebGPU 경로 검증은 호스트 브라우저에서 합니다. 배포된 스택을 WebGPU가 있는
@@ -52,6 +60,10 @@ tarball의 `files` 목록에는 `dist`, 문서, PDFium vendor 자산만 포함�
 - 공급자 selector에서 `in-memory`, `webapi`, `websocket` 선택 가능 확인
 - Web API/WebSocket 공급자의 원격 placeholder raster 수신 확인
 - in-memory 샘플 로드 후 뷰어 영역 스크린샷에서 실제 어두운 텍스트 픽셀 존재 확인
+- 빨강·초록·파랑 사각형 PDF(`tests/fixtures/rgb-squares.pdf`)를 업로드해 화면의 세
+  위치가 PDF content stream 순서대로 빨강·초록·파랑인지 확인
+  (`tests/playwright/pdfgpu-color-order.spec.js`). 흑백 샘플은 R/B가 바뀌어도 똑같이
+  보이므로 어두운 픽셀 검사로는 채널 순서를 볼 수 없습니다.
 - zoom 조작 시 `renderQuality` 갱신 확인
 - `fitWidth`, `fitHeight`, `fitPage` 조작 시 상태 갱신 확인
 - detail image DPI 슬라이더 조작 시 status의 `DPI` 값과 detail 렌더 요청 버킷 갱신 확인

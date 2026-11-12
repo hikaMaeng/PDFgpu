@@ -67,7 +67,7 @@
   - `spreadPlacement`: 양쪽 보기에서 첫 페이지 좌우 배치
   - `fitMode`: 현재 맞춤 정책
   - `scrollMode`: 현재 스크롤 정책
-  - `queueDepth`: 실제 엔진 큐(워커) 깊이
+  - `queueDepth`: 실제 동시 래스터 요청 수. in-memory 공급자는 1(main thread 단일 PDFium 인스턴스), 원격 공급자는 최대 3
   - `renderQuality`: `'idle' | 'preview' | 'detail'`
   - `detailDpi`: 현재 detail tile 래스터 요청 DPI
   - `backend`: `'webgpu' | 'unsupported' | 'error'`

@@ -40,7 +40,6 @@ export default function App() {
   useEffect(() => {
     let disposed = false;
     let detach = () => {};
-    let controllerDisposer = () => {};
 
     const initialize = async () => {
       if (!viewerRef.current) return;
@@ -65,7 +64,7 @@ export default function App() {
       });
 
       if (disposed) {
-        provider.dispose();
+        // The controller owns the provider: its dispose() releases both.
         controller.dispose();
         return;
       }
@@ -74,7 +73,6 @@ export default function App() {
       detach = controller.subscribe((next) => {
         setStatus(next);
       });
-      controllerDisposer = () => provider.dispose();
     };
 
     initRef.current = initialize();
@@ -83,7 +81,6 @@ export default function App() {
     return () => {
       disposed = true;
       detach();
-      controllerDisposer();
       controllerRef.current?.dispose();
       controllerRef.current = null;
     };

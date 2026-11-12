@@ -1,3 +1,4 @@
+import { FPDF_REVERSE_BYTE_ORDER, pdfiumRgbxToRgba } from './pixels.js';
 import type {
   PdfDocumentManifest,
   PdfDocumentSource,
@@ -66,7 +67,8 @@ type LoadedDocument = {
 
 const PREVIEW_DPI = 96;
 const TILE_SIZE = 512;
-const RENDER_FLAGS = 16;
+// PDFium writes R, G, B, x with this flag; see engine/pixels.ts.
+const RENDER_FLAGS = FPDF_REVERSE_BYTE_ORDER;
 const WHITE = 0xffffffff;
 const PT_TO_PX_SCALE = 96 / 72;
 
@@ -85,18 +87,6 @@ function roundInt(value: number) {
   return Math.max(1, Math.round(value));
 }
 
-function pdfiumBgraToRgba(
-  sourceBytes: Uint8ClampedArray<ArrayBuffer>
-): Uint8ClampedArray<ArrayBuffer> {
-  const rgba = new Uint8ClampedArray(new ArrayBuffer(sourceBytes.length));
-  for (let index = 0; index < sourceBytes.length; index += 4) {
-    rgba[index] = sourceBytes[index + 2];
-    rgba[index + 1] = sourceBytes[index + 1];
-    rgba[index + 2] = sourceBytes[index];
-    rgba[index + 3] = 255;
-  }
-  return rgba;
-}
 
 function normalizeRotation(rawRotation: number) {
   const normalized = ((rawRotation % 360) + 360) % 360;
@@ -274,7 +264,7 @@ async function createBitmapImage(
       )
     );
     const imageData = new ImageData(
-      pdfiumBgraToRgba(sourceBytes),
+      pdfiumRgbxToRgba(sourceBytes),
       targetBitmapWidth,
       targetBitmapHeight
     );
@@ -414,20 +404,24 @@ class PdfiumWorker {
 }
 
 export interface PdfDocumentEngineCreateOptions {
+  /**
+   * Accepted for compatibility; currently has no effect.
+   *
+   * Every in-memory "worker" shared the same PDFium WASM instance on the main
+   * thread, so a pool of N rendered nothing in parallel while each `open()`
+   * copied the whole file into the WASM heap N times (and the viewer limits
+   * in-memory concurrency to 1 anyway). The engine therefore keeps exactly one
+   * document instance. Real parallel rasterization needs Web Workers, each with
+   * its own PDFium instance; this option is reserved for that.
+   */
   poolSize?: number;
 }
 
 export async function createPdfDocumentEngine(
-  options: PdfDocumentEngineCreateOptions = {}
+  _options: PdfDocumentEngineCreateOptions = {}
 ): Promise<PdfDocumentEngine> {
-  const hardware = typeof navigator !== 'undefined' ? navigator.hardwareConcurrency || 4 : 4;
-  const poolSize = clamp(
-    Math.min(3, Math.max(1, (options.poolSize ?? hardware - 1))),
-    1,
-    3
-  );
   const pdfium = await ensurePdfium();
-  return new PdfDocumentEngineImpl(pdfium, poolSize);
+  return new PdfDocumentEngineImpl(pdfium, 1);
 }
 
 class PdfDocumentEngineImpl implements PdfDocumentEngine {

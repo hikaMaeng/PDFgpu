@@ -12,7 +12,6 @@ export type Frame = {
     tiles: RenderedTile[];
 };
 export declare class PageRenderer {
-    private lastFrame;
     private _backend;
     private initError;
     private isInitialized;
@@ -57,8 +56,6 @@ export declare class PageRenderer {
     private vertexBufferBytes;
     init(canvas: HTMLCanvasElement): Promise<'webgpu' | 'unsupported' | 'error'>;
     render(canvas: HTMLCanvasElement, frame: Frame): void;
-    renderLastFrameToCanvas(canvas: HTMLCanvasElement): boolean;
-    renderLastPreviewFrameToCanvas(canvas: HTMLCanvasElement): boolean;
     get state(): 'webgpu' | 'unsupported' | 'error';
     get reason(): string;
     /** Number of GPU textures currently held. */

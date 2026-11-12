@@ -36,7 +36,13 @@ preview로 남습니다. zoom 0.5 / 1 / 2 회귀 테스트가
 - 키는 `kind/pageIndex/dpiBucket/tileX/tileY`
 - 엔트리 바이트 산정: `width * height * 4`
 - 기본 한도: `192 * 1024 * 1024` bytes
-- `keepKeys`가 지정되면 해당 키는 `prune`에서 보호
+- `prune(keepKeys)`는 이름과 달리 keep 밖 항목을 전부 지우지 않습니다. 예산 이하이면
+  아무것도 하지 않고, 예산을 넘으면 keep 밖에서 가장 오래된 항목부터 예산에
+  맞을 때까지 축출합니다(보호 집합이 있는 LRU).
+- 의도된 동작입니다. keep 집합은 보이는 페이지와 활성 ±1만 담으므로, 엄격하게
+  지우면 두 페이지만 떨어져도 되돌아올 때 다시 래스터화합니다. 크롬 실측
+  (WebGPU, 확대, DPI 384): 세 화면을 되돌아가는 동안 새 텍스처 업로드 0건.
+- GPU 텍스처는 `onRelease`로 같은 수명을 따르므로 GPU 메모리도 이 예산에 묶입니다.
 
 ## GPU 텍스처 소유권
 
@@ -88,16 +94,37 @@ preview로 남습니다. zoom 0.5 / 1 / 2 회귀 테스트가
 
 ## PDFium in-memory 공급자
 
+- 렌더 플래그는 `FPDF_REVERSE_BYTE_ORDER`(0x10)입니다. PDFium이 이미 R,G,B,x 순서로
+  출력하므로 JS 변환은 4번째 바이트만 255로 채웁니다(`engine/pixels.ts`). 이전
+  구현은 플래그 위에 R/B를 한 번 더 바꿔 빨강이 파랑으로 보였습니다. 변환이
+  렌더러 앞에 있으므로 WebGPU와 2D 두 경로 모두에 해당했습니다.
+
 - URL source downloads are read through the response stream. When the server
   provides `Content-Length`, byte progress is reported to the controller and
   mapped to the opening portion of `PdfGpuViewerState.loadProgress`; without a
   total size the consumer receives an indeterminate opening state.
 - 문서 open 시 manifest(page count, page size, rotation)는 첫 PDFium document에서 한 번만 추출합니다.
-- 렌더 worker용 추가 document들은 같은 manifest를 공유합니다. 500페이지급 문서에서 worker 수만큼 모든 페이지를 다시 여는 일을 피합니다.
+- 엔진은 PDFium document 인스턴스를 **하나만** 엽니다. 이전 구현의 "worker" 풀은
+  모두 같은 main thread WASM 인스턴스를 공유해 병렬성이 없었고, `open()`마다
+  파일 전체를 풀 크기만큼(하드웨어 48코어에서 3벌) WASM 힙에 복사했습니다.
+  `poolSize` 옵션은 호환을 위해 받지만 현재 효과가 없습니다. 실제 병렬
+  래스터화는 Web Worker마다 별도 PDFium 인스턴스가 필요하며 아직 구현되지
+  않았습니다.
 
 ## 원격 공급자 프로토콜
 
 - HTTP 공급자는 PDF bytes를 base64 JSON으로 업로드하고 `documentId`를 받습니다.
 - preview/detail 요청은 `documentId`와 페이지/DPI/타일 좌표를 전달합니다.
 - WebSocket 공급자는 같은 payload를 `{ id, method, payload }` JSON RPC로 보냅니다.
+- preview 요청도 `dpi`가 있으면 전달합니다(HTTP query `dpi`, WebSocket payload
+  `dpi`). 이전에는 두 공급자 모두 preview dpi를 버렸습니다.
+- 서버는 요청 dpi와 다른 해상도로 답할 수 있습니다(동봉 데모 서버는 preview를
+  항상 96 DPI로 돌려줍니다). 그래서 캡처는 요청 dpi가 아니라 **반환된 raster의
+  실제 크기/페이지 포인트**로 원본 영역을 잘라냅니다(`viewer/capture.ts`).
+
+## 소유권
+
+- 컨트롤러가 공급자를 소유합니다. `controller.dispose()`가 공급자 · 렌더러 ·
+  캐시를 정리하며, 소비자는 공급자를 따로 dispose하지 않습니다.
+- `dispose()`는 멱등입니다. 두 번째 호출은 아무것도 하지 않습니다.
 - 원격 이미지는 base64 인코딩된 이미지와 `contentType`을 반환하며, 클라이언트는 `HTMLImageElement`로 디코드합니다.

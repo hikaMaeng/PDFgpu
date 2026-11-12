@@ -3,6 +3,7 @@ import { findPageAtViewportPoint, projectOverlaysForVisiblePages, screenRectToAb
 import { RasterCache, cacheKey } from '../scheduler/byteBudgetCache.js';
 import { PageRenderer } from '../render/renderer.js';
 import { buildRenderQueue, detailSourceScale, type QueueRenderTask } from '../scheduler/queue.js';
+import { captureSourceRect } from './capture.js';
 import {
   type PdfDocumentManifest,
   type PdfDocumentSource,
@@ -345,23 +346,13 @@ class PdfGpuViewerControllerImpl implements PdfGpuViewerController, PdfGpuCaptur
     if (!context) throw new PdfGpuCaptureError('high-resolution-not-ready', 'capture canvas is unavailable');
     context.fillStyle = '#ffffff';
     context.fillRect(0, 0, canvas.width, canvas.height);
-    context.drawImage(raster.source as CanvasImageSource, Math.round(rect.x * scale), Math.round(rect.y * scale), canvas.width, canvas.height, 0, 0, canvas.width, canvas.height);
-    const previewCanvas = document.createElement('canvas');
-    if (!hasVisiblePixels(context, canvas) && this.renderer.renderLastPreviewFrameToCanvas(previewCanvas)) {
-      const visibleCanvas = document.createElement('canvas');
-      visibleCanvas.width = previewCanvas.width;
-      visibleCanvas.height = previewCanvas.height;
-      const visibleContext = visibleCanvas.getContext('2d');
-      visibleContext?.drawImage(previewCanvas, 0, 0);
-      const canvasBox = this.canvas.getBoundingClientRect();
-      const sourceScaleX = visibleCanvas.width / Math.max(1, canvasBox.width);
-      const sourceScaleY = visibleCanvas.height / Math.max(1, canvasBox.height);
-      const sourceX = (start.x - canvasBox.left) * sourceScaleX;
-      const sourceY = (start.y - canvasBox.top) * sourceScaleY;
-      context.fillStyle = '#ffffff';
-      context.fillRect(0, 0, canvas.width, canvas.height);
-      context.drawImage(visibleCanvas, sourceX, sourceY, Math.abs(end.x - start.x) * sourceScaleX, Math.abs(end.y - start.y) * sourceScaleY, 0, 0, canvas.width, canvas.height);
-    }
+    // Sample the source in the raster's own pixel space. A provider is not
+    // guaranteed to honour the requested dpi (the bundled demo server always
+    // returns a 96 DPI preview), so the source rectangle is derived from the
+    // raster's actual size per PDF point, not from `dpi`. Using `dpi` here
+    // cropped the wrong region whenever the two differed.
+    const { sx, sy, sw, sh } = captureSourceRect(rect, raster, manifestPage.widthPts, manifestPage.heightPts);
+    context.drawImage(raster.source as CanvasImageSource, sx, sy, sw, sh, 0, 0, canvas.width, canvas.height);
     const dataUrl = canvas.toDataURL('image/png');
     return { pageIndex: page.index, rect, imageBase64: dataUrl.slice(dataUrl.indexOf(',') + 1), mimeType: 'image/png', quality: 'high-resolution', dpi };
   }
@@ -389,6 +380,9 @@ class PdfGpuViewerControllerImpl implements PdfGpuViewerController, PdfGpuCaptur
   }
 
   dispose(): void {
+    // Idempotent: the controller owns the provider and disposes it below, so
+    // a second call must not dispose the provider (or the GPU device) again.
+    if (this.disposed) return;
     this.disposed = true;
     if (this.rafId !== null) {
       cancelAnimationFrame(this.rafId);
@@ -784,15 +778,29 @@ class PdfGpuViewerControllerImpl implements PdfGpuViewerController, PdfGpuCaptur
     const height = Math.max(1, Math.ceil(this.viewport.clientHeight || 1));
     const viewportTop = Math.max(0, this.viewport.scrollTop || 0);
 
-    this.canvas.width = width;
-    this.canvas.height = height;
-    this.canvas.style.width = `${width}px`;
-    this.canvas.style.height = `${height}px`;
-    // The sticky canvas is an overlay; cancel its flow height so the first
-    // page keeps the same top coordinate as the scroll content.
-    this.canvas.style.marginBottom = `${-height}px`;
-    this.canvas.style.top = '0';
-    this.canvas.style.transform = 'none';
+    // Resize only when the viewport changed. Measured in Chrome before this
+    // guard: 550 assignments over 275 frames, every one with the value the
+    // canvas already had (0 real resizes, 0 context reconfigures). Clearing
+    // is not lost: the WebGPU pass uses loadOp 'clear', and the 2D path
+    // (`PageRenderer.render2d`) resets its target canvas itself.
+    // The style check keeps this correct if anything else (e.g. `initialize`,
+    // which sets height '0') touches the styles while the pixel size matches.
+    if (
+      this.canvas.width !== width
+      || this.canvas.height !== height
+      || this.canvas.style.height !== `${height}px`
+      || this.canvas.style.width !== `${width}px`
+    ) {
+      this.canvas.width = width;
+      this.canvas.height = height;
+      this.canvas.style.width = `${width}px`;
+      this.canvas.style.height = `${height}px`;
+      // The sticky canvas is an overlay; cancel its flow height so the first
+      // page keeps the same top coordinate as the scroll content.
+      this.canvas.style.marginBottom = `${-height}px`;
+      this.canvas.style.top = '0';
+      this.canvas.style.transform = 'none';
+    }
 
     const tiles = [];
     const visibleSet = new Set(visiblePages);
@@ -1270,17 +1278,3 @@ class PdfGpuViewerControllerImpl implements PdfGpuViewerController, PdfGpuCaptur
   }
 }
 
-function hasVisiblePixels(context: CanvasRenderingContext2D, canvas: HTMLCanvasElement) {
-  const sampleWidth = Math.min(32, canvas.width);
-  const sampleHeight = Math.min(32, canvas.height);
-  const pixels = context.getImageData(
-    Math.max(0, Math.floor((canvas.width - sampleWidth) / 2)),
-    Math.max(0, Math.floor((canvas.height - sampleHeight) / 2)),
-    sampleWidth,
-    sampleHeight
-  ).data;
-  for (let index = 0; index < pixels.length; index += 4) {
-    if (pixels[index] > 8 || pixels[index + 1] > 8 || pixels[index + 2] > 8) return true;
-  }
-  return false;
-}

@@ -84,6 +84,19 @@ export class RasterCache {
     entries() {
         return this.values();
     }
+    /**
+     * Enforces the byte budget while protecting `keepKeys`. Despite the name,
+     * this does NOT remove every entry outside `keepKeys`: below budget it is a
+     * no-op, and above budget it evicts least-recently-used unprotected entries
+     * until the cache fits again (or only protected entries remain).
+     *
+     * That is deliberate. The viewer's keep set covers only visible pages and
+     * the active page +-1, so a strict prune would drop rasters two pages away
+     * and re-render them on scroll-back. Measured in Chrome (WebGPU, zoomed,
+     * DPI 384): scrolling back three screens uploaded 0 new textures because
+     * the rasters were still cached. GPU textures follow the same lifetime via
+     * `onRelease`, so GPU memory is bounded by this same budget.
+     */
     prune(keepKeys) {
         this.evict(keepKeys);
     }

@@ -92,7 +92,7 @@ import {
 const container = document.querySelector<HTMLElement>('#viewer');
 if (!container) throw new Error('viewer container is missing');
 
-const provider = await createPdfDocumentEngine({ poolSize: 2 });
+const provider = await createPdfDocumentEngine();
 const viewer = await createPdfGpuViewer({
   container,
   provider,
@@ -319,7 +319,7 @@ import {
 const container = document.querySelector<HTMLElement>('#viewer');
 if (!container) throw new Error('viewer container is missing');
 
-const provider = await createPdfDocumentEngine({ poolSize: 2 });
+const provider = await createPdfDocumentEngine();
 const viewer = await createPdfGpuViewer({
   container,
   provider,
