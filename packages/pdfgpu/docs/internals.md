@@ -110,6 +110,17 @@ preview로 남습니다. zoom 0.5 / 1 / 2 회귀 테스트가
 - 스프레드 행은 두 배치 모두 [1], [2,3], [4,5], …(1 기준)입니다. `normalizeViewerPage`는
   double 모드에서 페이지를 그 행의 첫 페이지로 보냅니다(1, 2, 4, 6, …). 이전 규칙(홀수가
   행 선두)은 3페이지를 행 [2,3]의 오른쪽에 착지시키고 2페이지를 1로 되돌렸습니다.
+- 행 구성(`spreadPairing`, `layout.ts` `spreadRows`): `alone`(기본) = (1), (2,3), (4,5)…,
+  `paired` = (1,2), (3,4)…. `buildLayout`, `normalizeViewerPage(page, count, mode, pairing)`,
+  `createViewerInteractionState({ pairing })`/`reduceViewerInteraction`, 컨트롤러의
+  `scrollToPage`와 fit 행 크기가 모두 같은 함수를 따릅니다. 키·휠은 ±2 후 행 선두로 정규화하므로
+  두 구성 모두 "다음 행의 첫 페이지"가 됩니다(마지막 홀수 페이지 포함).
+- `paired`에서는 `spreadPlacement`를 무시합니다. 1페이지는 항상 (1,2) 행의 왼쪽입니다.
+- 짝이 없는 마지막 페이지는 가운데가 아니라 2페이지 행의 왼쪽 슬롯에 놓여 위 행들의 왼쪽 열에
+  맞춰집니다(0.1.11부터).
+- `setSpreadPairing` 전환은 현재 페이지가 든 새 행의 첫 페이지로 착지합니다(alone (2,3) →
+  paired (1,2)). 착지한 행의 첫 페이지가 새 기준이 되므로 왕복하면 앞쪽으로 밀릴 수 있습니다
+  (page 모드 (2,3) → (1,2) → (1)).
 - 스프레드 첫 페이지는 두 배치 모두 2페이지 행 폭의 한 슬롯에 놓입니다(first-left는 왼쪽
   열, first-right는 오른쪽 열). 이전에는 first-left가 페이지를 가운데에 놓았습니다.
 - page 모드의 현재 페이지: 컨트롤러는 자기 이동(`scrollToPage`)이 남긴 scrollTop을 기준점으로

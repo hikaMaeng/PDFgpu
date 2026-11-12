@@ -151,3 +151,34 @@ test('page mode follows a scroll that leaves the old row partly visible', async 
   await page.keyboard.press('PageDown');
   await expect(status).toContainText(`Pages: ${centre + 2} / 12`);
 });
+
+test('spread pairing switches rows at runtime and paging follows them', async ({ page }) => {
+  // Agreed rows: paired (1,2),(3,4),... ; alone (1),(2,3),... ; switching lands
+  // on the row that holds the current page.
+  const status = await openSample(page);
+  const region = page.getByRole('region', { name: 'PDF viewer' });
+  await page.getByLabel('scroll mode').selectOption('page');
+  await page.getByLabel('view mode').selectOption('spread');
+  await region.focus();
+  await page.keyboard.press('PageDown');
+  await expect(status).toContainText('Pages: 2 / 12');
+
+  await page.getByLabel('spread pairing').selectOption('paired');
+  await expect(status).toContainText('Pairing: paired');
+  await expect(status).toContainText('Pages: 1 / 12');
+  const sameRow = await page.evaluate(() => {
+    const top = (i) => document.querySelector(`[data-testid="pdfgpu-page-shell"][data-page-index="${i}"]`).getBoundingClientRect().top;
+    return Math.abs(top(0) - top(1)) < 1;
+  });
+  expect(sameRow).toBe(true);
+
+  await region.focus();
+  await page.keyboard.press('PageDown');
+  await expect(status).toContainText('Pages: 3 / 12');
+  await page.keyboard.press('PageDown');
+  await expect(status).toContainText('Pages: 5 / 12');
+
+  await page.getByLabel('spread pairing').selectOption('alone');
+  await expect(status).toContainText('Pairing: alone');
+  await expect(status).toContainText('Pages: 4 / 12');
+});

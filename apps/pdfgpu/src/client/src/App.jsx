@@ -23,6 +23,7 @@ export default function App() {
     endpoint: undefined,
     viewMode: 'single',
     spreadPlacement: 'first-right',
+    spreadPairing: 'alone',
     fitMode: 'none',
     scrollMode: 'continuous',
     queueDepth: 0,
@@ -161,6 +162,13 @@ export default function App() {
     }).catch((error) => console.error('[client] setSpreadPlacement failed', error));
   };
 
+  const handleSpreadPairing = (event) => {
+    const pairing = event.target.value;
+    withController((controller) => {
+      controller.setSpreadPairing(pairing);
+    }).catch((error) => console.error('[client] setSpreadPairing failed', error));
+  };
+
   const handleScrollMode = (event) => {
     const mode = event.target.value;
     withController((controller) => {
@@ -188,6 +196,7 @@ export default function App() {
         <span>QueueDepth: {status.queueDepth}</span>
         <span>View: {status.viewMode}</span>
         <span>FirstPage: {status.spreadPlacement}</span>
+        <span>Pairing: {status.spreadPairing}</span>
         <span>Fit: {status.fitMode}</span>
         <span>Scroll: {status.scrollMode}</span>
         <span>Quality: {status.renderQuality}</span>
@@ -260,6 +269,18 @@ export default function App() {
             >
               <option value="first-right">right side</option>
               <option value="first-left">left side</option>
+            </select>
+          </label>
+          <label htmlFor="spread-pairing">
+            Pairs
+            <select
+              id="spread-pairing"
+              value={status.spreadPairing}
+              onChange={handleSpreadPairing}
+              aria-label="spread pairing"
+            >
+              <option value="alone">cover alone</option>
+              <option value="paired">pairs from page 1</option>
             </select>
           </label>
           <label htmlFor="scroll-mode">

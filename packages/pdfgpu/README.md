@@ -84,7 +84,7 @@ PDFGPU `v0.1.0` is available as the exact
 
 ## PDFium dependency contract
 
-`@pdfgpu/core@0.1.10` requires exactly `@embedpdf/pdfium@2.15.1` (releases `0.1.0`–`0.1.9` used `2.14.0`).
+`@pdfgpu/core@0.1.11` requires exactly `@embedpdf/pdfium@2.15.1` (releases `0.1.0`–`0.1.9` used `2.14.0`).
 The dependency specifier, lockfile integrity, and WASM import path are checked
 by the [release contract](../../release-contracts/pdfgpu/v0.1.0.json) before
 build and test. A future PDFium update must ship as a new PDFGPU release and
@@ -173,7 +173,7 @@ PDFGPU `v0.1.0`은 정확한
 
 ## PDFium 의존성 계약
 
-`@pdfgpu/core@0.1.10`은 정확히 `@embedpdf/pdfium@2.15.1`을 요구합니다(`0.1.0`–`0.1.9`는 `2.14.0`).
+`@pdfgpu/core@0.1.11`은 정확히 `@embedpdf/pdfium@2.15.1`을 요구합니다(`0.1.0`–`0.1.9`는 `2.14.0`).
 의존성 specifier, lockfile integrity, WASM import 경로는 빌드와 테스트 전에
 [릴리스 계약](../../release-contracts/pdfgpu/v0.1.0.json)으로 검증됩니다.
 향후 PDFium 업데이트는 반드시 새 PDFGPU 릴리스와 새 버전별 계약 파일로

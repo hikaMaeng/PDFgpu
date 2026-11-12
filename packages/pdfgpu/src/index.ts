@@ -14,6 +14,7 @@ import type {
   PdfGpuViewerController,
   PdfGpuViewerOptions,
   PdfGpuViewerState,
+  PdfGpuSpreadPairing,
   PdfGpuCaptureResult,
   PdfGpuCaptureController,
   PdfGpuAbsoluteRect,
@@ -50,7 +51,8 @@ export {
   type PdfGpuCapabilities,
   type PdfGpuViewerController,
   type PdfGpuViewerOptions,
-  type PdfGpuViewerState
+  type PdfGpuViewerState,
+  type PdfGpuSpreadPairing
   , type PdfGpuCaptureResult
   , type PdfGpuCaptureController
 };

@@ -1,0 +1,12 @@
+{
+  "pdfgpuVersion": "0.1.11",
+  "corePackageName": "@pdfgpu/core",
+  "pdfium": {
+    "packageName": "@embedpdf/pdfium",
+    "packageVersion": "2.15.1",
+    "dependencySpec": "2.15.1",
+    "lockfileIntegrity": "sha512-qDH4gEkGSQT0iM+07Hpm3LyvoB7PEFbW3Qyk6+LPkEYLJYfHagkHM1OzYlDq2EDOhJRguykTkzdMOT3/w27x5Q==",
+    "wasmModulePath": "@embedpdf/pdfium/pdfium.wasm?url",
+    "upstreamUrl": "https://github.com/chromium/pdfium"
+  }
+}

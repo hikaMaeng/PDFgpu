@@ -30,6 +30,7 @@
 - provider selector: `select#provider-mode`, accessible name `raster provider`
 - view selector: `select#view-mode`, accessible name `view mode`
 - spread placement selector: `select#spread-placement`, accessible name `first page spread placement`
+- spread pairing selector: `select#spread-pairing`, accessible name `spread pairing` (`alone` | `paired`)
 - scroll selector: `select#scroll-mode`, accessible name `scroll mode`
 - detail DPI slider: `input#detail-dpi`, accessible name `detail image dpi`
 - page shell:

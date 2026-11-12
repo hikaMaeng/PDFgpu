@@ -24,6 +24,10 @@
 - 예기치 않은 `device.lost` 뒤 같은 캔버스에서 새 장치로 재구성·재업로드하고, 스스로
   destroy한 장치는 재구성하지 않으며, WebGPU 캔버스에 2D context를 요청하지 않는지 확인
   (`tests/gpu-device-loss.test.mjs`)
+- 스프레드 짝: 7쪽 행 구성(paired [1,2],[3,4],[5,6],[7] / alone [1],[2,3],[4,5],[6,7]),
+  `spreadRows`와 `buildLayout`의 일치(1~9쪽), paired에서 배치 무시, 단독 마지막 페이지의 왼쪽 열,
+  모든 페이지의 행 선두 정규화, 행 단위 앞뒤 이동, 전환 착지 (`tests/spread-pairing.test.mjs`).
+  기대 행은 리듀서가 아니라 `buildLayout`이 그린 결과에서 읽습니다.
 - PDFium 워커 풀: 워커마다 바이트 사본과 첫 워커의 manifest, 동시 렌더(4 워커에서
   최대 4개 동시)와 균등 배정, 첫 워커만 열렸을 때 조기 반환과 준비된 워커에만 배정,
   대기 요청 취소, 늦게 온 비트맵 닫기, 워커 충돌 격리, dispose 종료, 워커 생성 실패 시
@@ -37,7 +41,7 @@ npm run verify:release-contract
 npm run test -w packages/pdfgpu
 ```
 
-현재 core unit test는 58개입니다. 배포 리포트 파서 테스트 3개는 저장소 루트의
+현재 core unit test는 66개입니다. 배포 리포트 파서 테스트 3개는 저장소 루트의
 `tests/scripts/deploy-report.test.mjs`에 있습니다(`node --test tests/scripts/*.test.mjs`).
 
 WebGPU 경로는 Playwright 컨테이너에서 `backend: unsupported`로 떨어집니다.
@@ -77,7 +81,8 @@ tarball의 `files` 목록에는 `dist`, 문서, PDFium vendor 자산만 포함�
   겹치는 shell과 같음을 확인 (`tests/playwright/pdfgpu-navigation.spec.js`). 리듀서 단위
   테스트만으로는 키 분기에 실제로 도달하는지 증명할 수 없어서 브라우저에서 누릅니다.
 - 같은 스펙에서 page 모드가 스크롤바식 이동(키 없이 scrollTop 변경)을 따라가는지(옛 행이 일부
-  남는 경우 포함), fit height/page에서 페이지 전체가 뷰어 안에 들어오는지 확인.
+  남는 경우 포함), fit height/page에서 페이지 전체가 뷰어 안에 들어오는지, 짝 전환 토글이 행을
+  바꾸고 페이지 이동이 새 행을 따르는지 확인.
 - zoom 조작 시 `renderQuality` 갱신 확인
 - `fitWidth`, `fitHeight`, `fitPage` 조작 시 상태 갱신 확인
 - detail image DPI 슬라이더 조작 시 status의 `DPI` 값과 detail 렌더 요청 버킷 갱신 확인

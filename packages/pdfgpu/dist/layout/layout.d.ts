@@ -21,9 +21,18 @@ export interface ViewportWindow {
 }
 export type ViewMode = 'single' | 'spread';
 export type SpreadPlacement = 'first-left' | 'first-right';
+/**
+ * How spread rows are formed. 'alone': page 1 on its own row, then (2,3),
+ * (4,5), ... (the cover convention, default). 'paired': (1,2), (3,4), ...
+ */
+export type SpreadPairing = 'alone' | 'paired';
+/** 0-based page indices of every spread row, in order. */
+export declare function spreadRows(pageCount: number, pairing?: SpreadPairing): number[][];
 export interface BuildLayoutOptions {
     viewMode?: ViewMode;
+    /** Ignored when `spreadPairing` is 'paired': page 1 is then always the left page of row (1,2). */
     spreadPlacement?: SpreadPlacement;
+    spreadPairing?: SpreadPairing;
     viewportWidth?: number;
     spreadGap?: number;
 }

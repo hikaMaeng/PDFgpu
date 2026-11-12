@@ -58,6 +58,13 @@ export type PdfDocumentSource =
 export type PdfRasterProviderKind = 'in-memory' | 'webapi' | 'websocket';
 export type PdfGpuViewMode = 'single' | 'spread';
 export type PdfGpuSpreadPlacement = 'first-left' | 'first-right';
+/**
+ * How two-page spread rows are formed.
+ * - 'alone' (default): page 1 on its own row, then (2,3), (4,5), ...
+ * - 'paired': (1,2), (3,4), ... ; `spreadPlacement` is ignored and page 1 is
+ *   always the left page.
+ */
+export type PdfGpuSpreadPairing = 'alone' | 'paired';
 export type PdfGpuFitMode = 'none' | 'width' | 'height' | 'page';
 export type PdfGpuScrollMode = 'continuous' | 'page';
 export type PdfGpuLoadPhase = 'idle' | 'opening' | 'rendering' | 'ready' | 'error';
@@ -89,6 +96,8 @@ export interface PdfGpuViewerOptions {
   providerKind?: PdfRasterProviderKind;
   viewMode?: PdfGpuViewMode;
   spreadPlacement?: PdfGpuSpreadPlacement;
+  /** Spread row formation; default 'alone'. */
+  spreadPairing?: PdfGpuSpreadPairing;
   fitMode?: PdfGpuFitMode;
   scrollMode?: PdfGpuScrollMode;
   initialZoom?: number;
@@ -109,6 +118,7 @@ export interface PdfGpuViewerState {
   endpoint?: string;
   viewMode: PdfGpuViewMode;
   spreadPlacement: PdfGpuSpreadPlacement;
+  spreadPairing: PdfGpuSpreadPairing;
   fitMode: PdfGpuFitMode;
   scrollMode: PdfGpuScrollMode;
   queueDepth: number;
@@ -132,6 +142,11 @@ export interface PdfGpuViewerController extends PdfGpuCaptureController {
   zoomOut(): void;
   setViewMode(mode: PdfGpuViewMode): void;
   setSpreadPlacement(placement: PdfGpuSpreadPlacement): void;
+  /**
+   * Switches spread row formation at runtime. The view lands on the row that
+   * holds the current page (alone (2,3) -> paired (1,2)); listeners are notified.
+   */
+  setSpreadPairing(pairing: PdfGpuSpreadPairing): void;
   setFitMode(mode: PdfGpuFitMode): void;
   setScrollMode(mode: PdfGpuScrollMode): void;
   setDetailDpi(dpi: number): void;

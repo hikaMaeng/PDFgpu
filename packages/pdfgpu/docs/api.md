@@ -41,7 +41,8 @@
   - `options.providerKind`는 상태 표시용 공급자 종류입니다.
   - `options.engine`은 이전 호출부 호환용 alias입니다.
   - `options.viewMode`: `'single' | 'spread'`
-  - `options.spreadPlacement`: `'first-left' | 'first-right'`
+  - `options.spreadPlacement`: `'first-left' | 'first-right'` (`spreadPairing: 'paired'`에서는 무시)
+  - `options.spreadPairing`: `'alone' | 'paired'`, 기본 `'alone'`. `alone` = (1), (2,3), (4,5)…, `paired` = (1,2), (3,4)…
   - `options.fitMode`: `'none' | 'width' | 'height' | 'page'`
   - `options.scrollMode`: `'continuous' | 'page'`
   - `options.detailDpi`: detail tile 래스터 요청 DPI입니다. `144..384` 범위에서 48 DPI 단위로 정규화됩니다.
@@ -52,6 +53,7 @@
     - `zoomOut()`
     - `setViewMode(mode)`
     - `setSpreadPlacement(placement)`
+    - `setSpreadPairing(pairing)` — 런타임 전환. 현재 페이지가 든 새 행의 첫 페이지로 착지하고 구독자에게 알립니다
     - `setFitMode(mode)`
     - `setScrollMode(mode)`
     - `setDetailDpi(dpi)`
@@ -70,6 +72,7 @@
   - `endpoint`: 원격 공급자 주소
   - `viewMode`: 현재 단일/양쪽 보기
   - `spreadPlacement`: 양쪽 보기에서 첫 페이지 좌우 배치
+  - `spreadPairing`: 양쪽 보기 행 구성 `'alone' | 'paired'`
   - `fitMode`: 현재 맞춤 정책
   - `scrollMode`: 현재 스크롤 정책
   - `queueDepth`: 실제 동시 래스터 요청 수. in-memory 공급자는 워커 풀 크기(메인 스레드 fallback은 1), 원격 공급자는 3(내장 Web API/WebSocket 공급자가 `queueDepth = 3`을 선언)

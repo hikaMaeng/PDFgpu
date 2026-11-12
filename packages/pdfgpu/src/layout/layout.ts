@@ -33,10 +33,31 @@ function getEstimateFrom(pageSizes: Map<number, PageLayoutInfo>): number {
 
 export type ViewMode = 'single' | 'spread';
 export type SpreadPlacement = 'first-left' | 'first-right';
+/**
+ * How spread rows are formed. 'alone': page 1 on its own row, then (2,3),
+ * (4,5), ... (the cover convention, default). 'paired': (1,2), (3,4), ...
+ */
+export type SpreadPairing = 'alone' | 'paired';
+
+/** 0-based page indices of every spread row, in order. */
+export function spreadRows(pageCount: number, pairing: SpreadPairing = 'alone'): number[][] {
+  const rows: number[][] = [];
+  let index = 0;
+  if (pairing === 'alone' && pageCount > 0) {
+    rows.push([0]);
+    index = 1;
+  }
+  for (; index < pageCount; index += 2) {
+    rows.push(index + 1 < pageCount ? [index, index + 1] : [index]);
+  }
+  return rows;
+}
 
 export interface BuildLayoutOptions {
   viewMode?: ViewMode;
+  /** Ignored when `spreadPairing` is 'paired': page 1 is then always the left page of row (1,2). */
   spreadPlacement?: SpreadPlacement;
+  spreadPairing?: SpreadPairing;
   viewportWidth?: number;
   spreadGap?: number;
 }
@@ -108,6 +129,7 @@ export function buildLayout(
   const viewportWidth = Math.max(1, options.viewportWidth ?? 1);
   const viewMode = options.viewMode ?? 'single';
   const spreadPlacement = options.spreadPlacement ?? 'first-right';
+  const spreadPairing = options.spreadPairing ?? 'alone';
   const spreadGap = options.spreadGap ?? pageGap;
   let cursor = 0;
   let totalWidth = 0;
@@ -130,7 +152,7 @@ export function buildLayout(
     const gap = spreadGap * zoom;
     let rowIndex = 0;
     let index = 0;
-    if (pageCount > 0) {
+    if (spreadPairing === 'alone' && pageCount > 0) {
       const page = scaledPage(pageSizes, 0, fallbackHeight, zoom);
       // The first page sits alone in one slot of a full two-page row, so it lines
       // up with the left or right column of every following row. 'first-left' used
@@ -157,7 +179,9 @@ export function buildLayout(
       const rightIndex = index + 1;
       const rightPage = rightIndex < pageCount ? scaledPage(pageSizes, rightIndex, fallbackHeight, zoom) : undefined;
       const rowHeight = Math.max(leftPage.height, rightPage?.height ?? 0);
-      const rowWidth = leftPage.width + (rightPage ? gap + rightPage.width : 0);
+      // A lone last page sits in the left slot of a full two-page row so it lines
+      // up with the left column of the rows above (it used to be centred).
+      const rowWidth = rightPage ? leftPage.width + gap + rightPage.width : leftPage.width * 2 + gap;
       const left = centeredLeft(viewportWidth, rowWidth);
       totalWidth = Math.max(totalWidth, rowWidth);
       positions.push({

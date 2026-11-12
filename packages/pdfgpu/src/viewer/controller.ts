@@ -1,4 +1,4 @@
-import { buildLayout, resolveViewportWindow, visiblePageIndices, windowPageIndices, type LayoutMetrics } from '../layout/layout.js';
+import { buildLayout, resolveViewportWindow, spreadRows, visiblePageIndices, windowPageIndices, type LayoutMetrics } from '../layout/layout.js';
 import { findPageAtViewportPoint, projectOverlaysForVisiblePages, screenRectToAbsoluteRect } from './coordinates.js';
 import { RasterCache, cacheKey } from '../scheduler/byteBudgetCache.js';
 import { PageRenderer } from '../render/renderer.js';
@@ -10,6 +10,7 @@ import {
   type PdfGpuFitMode,
   type PdfGpuScrollMode,
   type PdfGpuSpreadPlacement,
+  type PdfGpuSpreadPairing,
   type PdfGpuViewMode,
   type PdfGpuViewerController,
   type PdfGpuCaptureController,
@@ -145,6 +146,7 @@ class PdfGpuViewerControllerImpl implements PdfGpuViewerController, PdfGpuCaptur
       endpoint: this.engine.endpoint,
       viewMode: options.viewMode ?? 'single',
       spreadPlacement: options.spreadPlacement ?? 'first-right',
+      spreadPairing: options.spreadPairing ?? 'alone',
       fitMode: options.fitMode ?? 'none',
       scrollMode: options.scrollMode ?? 'continuous',
       queueDepth: 0,
@@ -191,6 +193,7 @@ class PdfGpuViewerControllerImpl implements PdfGpuViewerController, PdfGpuCaptur
     this.interaction = createViewerInteractionState({
       pageCount: 0,
       mode: viewerModeFromParts(this.state.scrollMode, this.state.viewMode),
+      pairing: this.state.spreadPairing,
     });
   }
 
@@ -277,6 +280,27 @@ class PdfGpuViewerControllerImpl implements PdfGpuViewerController, PdfGpuCaptur
     this.reapplyFitOrLayout();
   }
 
+  setSpreadPairing(pairing: PdfGpuSpreadPairing): void {
+    this.assertAlive();
+    if (pairing !== 'alone' && pairing !== 'paired') return;
+    if (this.state.spreadPairing === pairing) return;
+    // The page whose row we keep: the navigated page in page modes, the page
+    // at the centre in continuous scroll.
+    const currentIndex = this.interaction.mode === 'scroll'
+      ? this.activePageIndex
+      : this.interaction.page - 1;
+    this.state.spreadPairing = pairing;
+    this.interaction = reduceViewerInteraction(this.interaction, { type: 'setPairing', pairing }).state;
+    this.reapplyFitOrLayout();
+    if (this.manifest && currentIndex !== undefined && this.state.viewMode === 'spread') {
+      // Land on the first page of the new row that holds the current page.
+      const rows = spreadRows(this.manifest.pageCount, pairing);
+      const row = rows.find((r) => r.includes(currentIndex));
+      if (row) this.scrollToPage(row[0]);
+    }
+    this.notify();
+  }
+
   setFitMode(mode: PdfGpuFitMode): void {
     this.assertAlive();
     this.state.fitMode = mode;
@@ -324,7 +348,7 @@ class PdfGpuViewerControllerImpl implements PdfGpuViewerController, PdfGpuCaptur
 
   scrollToPage(index: number): void {
     if (!this.manifest) return;
-    const targetPage = normalizeViewerPage(index + 1, this.manifest.pageCount, this.interaction.mode);
+    const targetPage = normalizeViewerPage(index + 1, this.manifest.pageCount, this.interaction.mode, this.interaction.pairing);
     this.interaction = reduceViewerInteraction(this.interaction, { type: 'setPage', page: targetPage }).state;
     const target = targetPage - 1;
     const position = this.layout.pagePositions[target];
@@ -439,6 +463,7 @@ class PdfGpuViewerControllerImpl implements PdfGpuViewerController, PdfGpuCaptur
       endpoint: this.state.endpoint,
       viewMode: this.state.viewMode,
       spreadPlacement: this.state.spreadPlacement,
+      spreadPairing: this.state.spreadPairing,
       fitMode: this.state.fitMode,
       scrollMode: this.state.scrollMode,
       queueDepth: this.queueDepth,
@@ -581,7 +606,7 @@ class PdfGpuViewerControllerImpl implements PdfGpuViewerController, PdfGpuCaptur
     }
     const normalizedActive = active === undefined
       ? undefined
-      : normalizeViewerPage(active + 1, this.manifest.pageCount, this.interaction.mode) - 1;
+      : normalizeViewerPage(active + 1, this.manifest.pageCount, this.interaction.mode, this.interaction.pairing) - 1;
     this.activePageIndex = normalizedActive;
     this.state.visiblePages = [...this.visiblePages];
     this.state.activePage = normalizedActive !== undefined ? normalizedActive + 1 : this.state.activePage;
@@ -1108,6 +1133,7 @@ class PdfGpuViewerControllerImpl implements PdfGpuViewerController, PdfGpuCaptur
     this.layout = buildLayout(this.pageSizes.length, map, this.baseScale, this.pageGap, {
       viewMode: this.state.viewMode,
       spreadPlacement: this.state.spreadPlacement,
+      spreadPairing: this.state.spreadPairing,
       spreadGap: this.spreadGap,
       viewportWidth: this.viewport.clientWidth || 1
     });
@@ -1181,17 +1207,16 @@ class PdfGpuViewerControllerImpl implements PdfGpuViewerController, PdfGpuCaptur
     if (this.state.viewMode === 'single') {
       return Math.max(...this.pageSizes.map((page) => page.width), 1);
     }
-    const spreadGap = this.spreadGap;
+    // Every spread row, including a lone first or last page, takes the width of
+    // a two-page row (the lone page sits in one slot), matching buildLayout.
     let maxWidth = 1;
-    if (this.pageSizes[0]) {
-      // The first page occupies one slot of a two-page row in both placements.
-      maxWidth = Math.max(maxWidth, this.pageSizes[0].width * 2 + spreadGap);
-    }
-    for (let index = 1; index < this.pageSizes.length; index += 2) {
-      const left = this.pageSizes[index];
-      const right = this.pageSizes[index + 1];
-      if (!left) continue;
-      maxWidth = Math.max(maxWidth, left.width + (right ? spreadGap + right.width : 0));
+    for (const row of spreadRows(this.pageSizes.length, this.state.spreadPairing)) {
+      const [first, second] = row.map((index) => this.pageSizes[index]);
+      if (!first) continue;
+      const width = second
+        ? first.width + this.spreadGap + second.width
+        : first.width * 2 + this.spreadGap;
+      maxWidth = Math.max(maxWidth, width);
     }
     return maxWidth;
   }
@@ -1200,12 +1225,9 @@ class PdfGpuViewerControllerImpl implements PdfGpuViewerController, PdfGpuCaptur
     if (this.state.viewMode === 'single') {
       return Math.max(...this.pageSizes.map((page) => page.height), 1);
     }
-    let maxHeight = this.pageSizes[0]?.height ?? 1;
-    for (let index = 1; index < this.pageSizes.length; index += 2) {
-      const left = this.pageSizes[index];
-      const right = this.pageSizes[index + 1];
-      if (!left) continue;
-      maxHeight = Math.max(maxHeight, left.height, right?.height ?? 0);
+    let maxHeight = 1;
+    for (const row of spreadRows(this.pageSizes.length, this.state.spreadPairing)) {
+      for (const index of row) maxHeight = Math.max(maxHeight, this.pageSizes[index]?.height ?? 0);
     }
     return maxHeight;
   }
