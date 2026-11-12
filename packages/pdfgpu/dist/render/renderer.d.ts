@@ -43,6 +43,18 @@ export declare class PageRenderer {
      */
     private readonly gpuTextures;
     private gpuBytes;
+    /**
+     * Vertex buffer shared by every tile of a frame.
+     *
+     * - scope: this renderer instance; exactly one buffer at a time.
+     * - lifetime: created on the first frame, reallocated only to grow,
+     *   destroyed by `dispose`.
+     * - bound: the largest frame's tile count x 96 bytes, floor 4KB.
+     * - cleared by: `releaseVertexBuffer`, called from `ensureVertexBuffer` when
+     *   growing and from `dispose`.
+     */
+    private vertexBuffer;
+    private vertexBufferBytes;
     init(canvas: HTMLCanvasElement): Promise<'webgpu' | 'unsupported' | 'error'>;
     render(canvas: HTMLCanvasElement, frame: Frame): void;
     renderLastFrameToCanvas(canvas: HTMLCanvasElement): boolean;
@@ -65,6 +77,26 @@ export declare class PageRenderer {
     dispose(): void;
     private renderWebGpu;
     private getOrCreateTexture;
+    /**
+     * Bind group for `entry`, built once per (texture, pipeline) pair.
+     *
+     * Returns null when the device, pipeline or sampler is missing, or when the
+     * texture has no view, so the caller skips the tile rather than drawing with
+     * a half-built binding.
+     */
+    private getOrCreateBindGroup;
+    /**
+     * Shared vertex buffer large enough for `byteLength`.
+     *
+     * One buffer holds every tile of a frame; each tile draws from it with a
+     * `firstVertex` offset. The buffer is reallocated only when a frame needs
+     * more room than the last one did, and it grows monotonically, so a viewer
+     * that settles at a tile count stops allocating entirely. Capacity is
+     * bounded by the tile count the scheduler produces, and `dispose`
+     * (via `releaseVertexBuffer`) is what frees it.
+     */
+    private ensureVertexBuffer;
+    private releaseVertexBuffer;
     private render2d;
     private getFrameCanvas;
     private createPipeline;

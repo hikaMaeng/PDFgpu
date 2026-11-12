@@ -5,6 +5,18 @@ type GpuTextureEntry = {
   texture: WebGpuTextureLike;
   width: number;
   height: number;
+  /**
+   * View and bind group for this texture, created once and reused for every
+   * frame the texture is drawn in. Both depend only on the texture, the
+   * sampler and the pipeline layout, none of which change while the texture
+   * lives, so rebuilding them per frame was pure churn. `bindGroupPipeline`
+   * records which pipeline the bind group was built against: if the renderer
+   * ever rebuilds its pipeline, the stale bind group is replaced instead of
+   * being bound to a layout it no longer matches.
+   */
+  view: WebGpuTextureViewLike | null;
+  bindGroup: WebGpuBindGroupLike | null;
+  bindGroupPipeline: WebGpuRenderPipelineLike | null;
 };
 
 type WebGpuLike = any;
@@ -15,6 +27,8 @@ type WebGpuTextureFormatLike = string;
 type WebGpuRenderPipelineLike = any;
 type WebGpuSamplerLike = any;
 type WebGpuBufferLike = any;
+type WebGpuTextureViewLike = any;
+type WebGpuBindGroupLike = any;
 
 export type RenderedTile = {
   source: PdfImageSource;
@@ -111,6 +125,19 @@ export class PageRenderer {
    */
   private readonly gpuTextures = new Map<PdfImageSource, GpuTextureEntry>();
   private gpuBytes = 0;
+
+  /**
+   * Vertex buffer shared by every tile of a frame.
+   *
+   * - scope: this renderer instance; exactly one buffer at a time.
+   * - lifetime: created on the first frame, reallocated only to grow,
+   *   destroyed by `dispose`.
+   * - bound: the largest frame's tile count x 96 bytes, floor 4KB.
+   * - cleared by: `releaseVertexBuffer`, called from `ensureVertexBuffer` when
+   *   growing and from `dispose`.
+   */
+  private vertexBuffer: WebGpuBufferLike | null = null;
+  private vertexBufferBytes = 0;
 
   async init(canvas: HTMLCanvasElement): Promise<'webgpu' | 'unsupported' | 'error'> {
     if (this.isInitialized) return this._backend;
@@ -253,6 +280,7 @@ export class PageRenderer {
 
   dispose() {
     this.releaseAllTextures();
+    this.releaseVertexBuffer();
     this.lastFrame = null;
     if (this.device) {
       this.device.destroy?.();
@@ -268,8 +296,35 @@ export class PageRenderer {
   private renderWebGpu(frame: Frame) {
     if (!this.device || !this.context || !this.pipeline || !this.sampler) return;
 
+    // Resolve every tile's texture and pack all vertex data into one array
+    // before the pass starts, so the pass itself allocates nothing.
+    const drawable: { bindGroup: WebGpuBindGroupLike; firstVertex: number }[] = [];
+    const vertices = new Float32Array(frame.tiles.length * 6 * VERTEX_STRIDE);
+    let vertexCursor = 0;
+    for (const tile of frame.tiles) {
+      const entry = this.getOrCreateTexture(tile.source);
+      if (!entry) continue;
+      const bindGroup = this.getOrCreateBindGroup(entry);
+      if (!bindGroup) continue;
+      vertices.set(vertexData(tile, frame.width, frame.height), vertexCursor * VERTEX_STRIDE);
+      drawable.push({ bindGroup, firstVertex: vertexCursor });
+      vertexCursor += 6;
+    }
+
+    const vertexBuffer = vertexCursor > 0
+      ? this.ensureVertexBuffer(vertexCursor * VERTEX_STRIDE * 4)
+      : null;
+    if (vertexBuffer) {
+      this.device.queue.writeBuffer(
+        vertexBuffer,
+        0,
+        vertices.buffer,
+        vertices.byteOffset,
+        vertexCursor * VERTEX_STRIDE * 4
+      );
+    }
+
     const encoder = this.device.createCommandEncoder();
-    const vertexBuffers: WebGpuBufferLike[] = [];
     const pass = encoder.beginRenderPass({
       colorAttachments: [
         {
@@ -282,33 +337,16 @@ export class PageRenderer {
     });
 
     pass.setPipeline(this.pipeline);
-    for (const tile of frame.tiles) {
-      const texture = this.getOrCreateTexture(tile.source);
-      if (!texture) continue;
-      const vertices = vertexData(tile, frame.width, frame.height);
-      const vertexBuffer = this.device.createBuffer({
-        size: vertices.byteLength,
-        usage: GPU_BUFFER_USAGE_VERTEX | GPU_BUFFER_USAGE_COPY_DST
-      });
-      vertexBuffers.push(vertexBuffer);
-      this.device.queue.writeBuffer(vertexBuffer, 0, vertices);
-      const bindGroup = this.device.createBindGroup({
-        layout: this.pipeline.getBindGroupLayout(0),
-        entries: [
-          { binding: 0, resource: this.sampler },
-          { binding: 1, resource: texture.texture.createView() }
-        ]
-      });
-      pass.setBindGroup(0, bindGroup);
+    if (vertexBuffer) {
       pass.setVertexBuffer(0, vertexBuffer);
-      pass.draw(6);
+      for (const item of drawable) {
+        pass.setBindGroup(0, item.bindGroup);
+        pass.draw(6, 1, item.firstVertex);
+      }
     }
 
     pass.end();
     this.device.queue.submit([encoder.finish()]);
-    for (const vertexBuffer of vertexBuffers) {
-      vertexBuffer.destroy?.();
-    }
   }
 
   private getOrCreateTexture(source: PdfImageSource): GpuTextureEntry | null {
@@ -329,10 +367,76 @@ export class PageRenderer {
       [width, height]
     );
 
-    const entry = { source, texture, width, height };
+    const entry: GpuTextureEntry = {
+      source,
+      texture,
+      width,
+      height,
+      view: texture.createView?.() ?? null,
+      bindGroup: null,
+      bindGroupPipeline: null
+    };
     this.gpuTextures.set(source, entry);
     this.gpuBytes += width * height * 4;
     return entry;
+  }
+
+  /**
+   * Bind group for `entry`, built once per (texture, pipeline) pair.
+   *
+   * Returns null when the device, pipeline or sampler is missing, or when the
+   * texture has no view, so the caller skips the tile rather than drawing with
+   * a half-built binding.
+   */
+  private getOrCreateBindGroup(entry: GpuTextureEntry): WebGpuBindGroupLike | null {
+    if (!this.device || !this.pipeline || !this.sampler) return null;
+    if (!entry.view) return null;
+    if (entry.bindGroup && entry.bindGroupPipeline === this.pipeline) {
+      return entry.bindGroup;
+    }
+    const bindGroup = this.device.createBindGroup({
+      layout: this.pipeline.getBindGroupLayout(0),
+      entries: [
+        { binding: 0, resource: this.sampler },
+        { binding: 1, resource: entry.view }
+      ]
+    });
+    entry.bindGroup = bindGroup;
+    entry.bindGroupPipeline = this.pipeline;
+    return bindGroup;
+  }
+
+  /**
+   * Shared vertex buffer large enough for `byteLength`.
+   *
+   * One buffer holds every tile of a frame; each tile draws from it with a
+   * `firstVertex` offset. The buffer is reallocated only when a frame needs
+   * more room than the last one did, and it grows monotonically, so a viewer
+   * that settles at a tile count stops allocating entirely. Capacity is
+   * bounded by the tile count the scheduler produces, and `dispose`
+   * (via `releaseVertexBuffer`) is what frees it.
+   */
+  private ensureVertexBuffer(byteLength: number): WebGpuBufferLike | null {
+    if (!this.device) return null;
+    if (this.vertexBuffer && this.vertexBufferBytes >= byteLength) {
+      return this.vertexBuffer;
+    }
+    this.releaseVertexBuffer();
+    const size = Math.max(byteLength, 4096);
+    this.vertexBuffer = this.device.createBuffer({
+      size,
+      usage: GPU_BUFFER_USAGE_VERTEX | GPU_BUFFER_USAGE_COPY_DST
+    });
+    this.vertexBufferBytes = size;
+    return this.vertexBuffer;
+  }
+
+  private releaseVertexBuffer(): void {
+    if (this.vertexBuffer) {
+      this.vertexBuffer.destroy?.();
+      this.vertexBuffer = null;
+    }
+    this.vertexBufferBytes = 0;
   }
 
   private render2d(canvas: HTMLCanvasElement, frame: Frame): void {

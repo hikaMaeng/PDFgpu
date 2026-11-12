@@ -53,6 +53,24 @@ preview로 남습니다. zoom 0.5 / 1 / 2 회귀 테스트가
   이 때문에 이전 구현은 캐시가 버린 raster의 텍스처를 영구히 보유했습니다
   (측정: raster 200개 삽입 시 생성 200 · 파괴 0 · 캐시 보유 10 → 190개 누수).
 
+## 프레임당 GPU 객체
+
+`renderWebGpu`는 프레임마다 command encoder 1개, 스왑체인 view 1개, submit 1회만
+새로 만듭니다. 타일에 묶인 것은 전부 프레임보다 오래 삽니다.
+
+- 텍스처 view와 bind group은 `GpuTextureEntry`에 한 번 만들어 보관합니다. 둘 다
+  텍스처 · sampler · pipeline 레이아웃에만 의존하고 셋 다 텍스처가 사는 동안
+  바뀌지 않습니다. `bindGroupPipeline`에 어느 pipeline으로 만들었는지 기록해,
+  렌더러가 pipeline을 다시 만들면 낡은 bind group을 교체합니다.
+- 정점 데이터는 프레임의 모든 타일을 **하나의 버퍼**에 담고 타일마다
+  `draw(6, 1, firstVertex)`로 제 몫을 그립니다. 버퍼는 더 큰 프레임이 올 때만
+  재할당되며 단조 증가하므로, 타일 수가 안정되면 할당이 멈춥니다.
+
+이전 구현은 타일마다 매 프레임 `createBuffer` · `writeBuffer` ·
+`createBindGroup` · `createView`를 새로 했습니다. 실제 크롬에서 275프레임 구간에
+`createBuffer` 34,821회(프레임당 126.6)가 관측됐습니다. 같은 조작에서 수정 후는
+269프레임에 160회(프레임당 0.59)입니다.
+
 ## 큐
 
 - 스크롤/줌은 입력 debounce 없이 다음 animation frame에서 즉시 viewport/window를 갱신합니다.

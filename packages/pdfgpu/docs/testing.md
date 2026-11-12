@@ -14,6 +14,9 @@
 - scroll/single/double 상호작용 matrix, keyboard editable target, Ctrl+wheel zoom
 - detail 타일 격자가 zoom 0.5/1/2에서 엔진 native raster를 벗어나지 않고 layout 페이지를 빈틈 없이 덮는지 확인 (`tests/detail-tile-coverage.test.mjs`)
 - GPU 텍스처 수가 캐시 보유 raster 수를 넘지 않고, `clear`/`delete`/`dispose`에서 전부 파괴되는지 확인 (`tests/gpu-texture-release.test.mjs`, 가짜 WebGPU device)
+- 프레임이 쌓여도 `createBuffer`/`createBindGroup`/`createView` 호출이 늘지 않고,
+  타일마다 공유 정점 버퍼의 제 몫(`firstVertex`)에 올바른 clip 좌표가 쓰이는지 확인
+  (`tests/gpu-frame-allocations.test.mjs`, 호출을 세는 가짜 WebGPU device)
 
 실행:
 
@@ -22,9 +25,21 @@ pnpm run verify:release-contract
 pnpm --filter @pdfgpu/core test
 ```
 
-현재 core unit test는 35개입니다. WebGPU 경로는 Playwright 컨테이너에서
-`backend: unsupported`로 떨어지므로, 텍스처 수명은 가짜 device를 주입한 단위
-테스트로만 검증할 수 있고 브라우저 실행은 2D fallback 무회귀만 보여줍니다. Windows에서도 패키지 소유의 TypeScript
+현재 core unit test는 38개입니다.
+
+WebGPU 경로는 Playwright 컨테이너에서 `backend: unsupported`로 떨어집니다.
+compose의 `e2e` 서비스에 GPU가 전달되지 않기 때문이며(`playwright.config.js`는
+`--enable-unsafe-webgpu` 등을 이미 넘기고 있습니다), 따라서 **배포 e2e 통과는 2D
+fallback 무회귀만 뜻합니다**. `renderWebGpu`는 그 컨테이너에서 한 줄도 실행되지
+않습니다.
+
+실제 WebGPU 경로 검증은 호스트 브라우저에서 합니다. 배포된 스택을 WebGPU가 있는
+크롬으로 열고, `GPUDevice`/`GPUTexture`/`GPUBuffer`/`GPUQueue` 프로토타입을 감싸
+호출 수를 직접 셉니다(앱 자체 카운터가 아니라 브라우저 API 호출을 세는 것이
+요점입니다). 이 절차로 측정한 값은
+`tests/reports/pdfgpu-frame-allocations/`에 남깁니다.
+
+Windows에서도 패키지 소유의 TypeScript
 devDependency와 `pnpm install`만으로 `dist`를 재생성할 수 있어야 하며, pack한
 tarball의 `files` 목록에는 `dist`, 문서, PDFium vendor 자산만 포함되어야 합니다.
 릴리스 계약 검증은 PDFGPU 버전, `@embedpdf/pdfium` exact dependency,
