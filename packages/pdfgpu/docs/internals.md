@@ -77,6 +77,24 @@ preview로 남습니다. zoom 0.5 / 1 / 2 회귀 테스트가
 `createBuffer` 34,821회(프레임당 126.6)가 관측됐습니다. 같은 조작에서 수정 후는
 269프레임에 160회(프레임당 0.59)입니다.
 
+## GPU 장치 상실
+
+- `device.lost`가 `'destroyed'` 외의 이유로 풀리면(GPU 프로세스 재시작 등) 같은
+  캔버스에 새 adapter/device를 요청해 context를 다시 configure합니다. 죽은 장치의
+  텍스처는 `destroy()` 없이 버리고, 캐시의 raster에서 다음 프레임에 다시 올립니다.
+  복구되면 `onDeviceRestored`로 뷰어에 다시 그리기를 요청합니다.
+- `webgpu` context를 받은 캔버스는 2D context를 줄 수 없습니다. 그래서 WebGPU 렌더가
+  실패해도 그 캔버스에 2D fallback을 시도하지 않고 프레임을 건너뜁니다. 이전
+  구현은 이 경우 매 프레임 `'2d context unavailable'`을 던졌습니다. 2D 경로는
+  WebGPU를 처음부터 쓸 수 없던 경우(`unsupported`)에만 씁니다.
+
+## 상태 알림
+
+- `renderCycle`은 스크롤 중 매 animation frame마다 `notify()`를 부릅니다. 모든 상태
+  필드(원시값, `visiblePages`는 원소 비교)가 직전 스냅샷과 같으면 구독자를 부르지
+  않습니다. React 소비자가 같은 상태로 매 프레임 전체를 다시 렌더링하던 것을
+  막기 위한 것입니다. 상태에 중첩 객체가 없으므로 제자리 수정이 묻힐 일은 없습니다.
+
 ## 큐
 
 - 스크롤/줌은 입력 debounce 없이 다음 animation frame에서 즉시 viewport/window를 갱신합니다.

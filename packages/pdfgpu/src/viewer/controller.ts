@@ -211,6 +211,12 @@ class PdfGpuViewerControllerImpl implements PdfGpuViewerController, PdfGpuCaptur
     this.bindEvents();
 
     this.state.backend = await this.renderer.init(this.canvas);
+    this.renderer.onDeviceRestored = () => {
+      if (this.disposed) return;
+      this.state.backend = this.renderer.state;
+      this.notify();
+      this.scheduleUpdate();
+    };
     this.state.renderQuality = 'idle';
     this.notify();
   }
@@ -1196,10 +1202,15 @@ class PdfGpuViewerControllerImpl implements PdfGpuViewerController, PdfGpuCaptur
   }
 
   private notify() {
-    this.snapshot = {
+    const next = {
       ...this.state,
       visiblePages: [...this.visiblePages]
     };
+    // renderCycle calls this on every animation frame while scrolling. Skip
+    // listeners when nothing observable changed, so a React consumer does not
+    // re-render the whole app once per frame with an identical state.
+    if (this.snapshot && sameViewerState(this.snapshot, next)) return;
+    this.snapshot = next;
     this.listeners.forEach((listener) => listener(this.snapshot));
   }
 
@@ -1278,3 +1289,20 @@ class PdfGpuViewerControllerImpl implements PdfGpuViewerController, PdfGpuCaptur
   }
 }
 
+/** Shallow equality over every state field; arrays compared element-wise. */
+function sameViewerState(a: PdfGpuViewerState, b: PdfGpuViewerState): boolean {
+  const keys = new Set([...Object.keys(a), ...Object.keys(b)]) as Set<keyof PdfGpuViewerState>;
+  for (const key of keys) {
+    const left = a[key] as unknown;
+    const right = b[key] as unknown;
+    if (Array.isArray(left) && Array.isArray(right)) {
+      if (left.length !== right.length) return false;
+      for (let index = 0; index < left.length; index += 1) {
+        if (left[index] !== right[index]) return false;
+      }
+      continue;
+    }
+    if (left !== right) return false;
+  }
+  return true;
+}

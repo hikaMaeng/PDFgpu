@@ -211,6 +211,13 @@ class PdfGpuViewerControllerImpl {
         this.viewport.appendChild(this.content);
         this.bindEvents();
         this.state.backend = await this.renderer.init(this.canvas);
+        this.renderer.onDeviceRestored = () => {
+            if (this.disposed)
+                return;
+            this.state.backend = this.renderer.state;
+            this.notify();
+            this.scheduleUpdate();
+        };
         this.state.renderQuality = 'idle';
         this.notify();
     }
@@ -1116,10 +1123,16 @@ class PdfGpuViewerControllerImpl {
         this.inFlightTasks.clear();
     }
     notify() {
-        this.snapshot = {
+        const next = {
             ...this.state,
             visiblePages: [...this.visiblePages]
         };
+        // renderCycle calls this on every animation frame while scrolling. Skip
+        // listeners when nothing observable changed, so a React consumer does not
+        // re-render the whole app once per frame with an identical state.
+        if (this.snapshot && sameViewerState(this.snapshot, next))
+            return;
+        this.snapshot = next;
         this.listeners.forEach((listener) => listener(this.snapshot));
     }
     markActiveInteraction() {
@@ -1156,4 +1169,24 @@ class PdfGpuViewerControllerImpl {
         if (this.disposed)
             throw new Error('viewer controller is disposed');
     }
+}
+/** Shallow equality over every state field; arrays compared element-wise. */
+function sameViewerState(a, b) {
+    const keys = new Set([...Object.keys(a), ...Object.keys(b)]);
+    for (const key of keys) {
+        const left = a[key];
+        const right = b[key];
+        if (Array.isArray(left) && Array.isArray(right)) {
+            if (left.length !== right.length)
+                return false;
+            for (let index = 0; index < left.length; index += 1) {
+                if (left[index] !== right[index])
+                    return false;
+            }
+            continue;
+        }
+        if (left !== right)
+            return false;
+    }
+    return true;
 }

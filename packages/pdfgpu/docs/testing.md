@@ -21,6 +21,9 @@
   preview 요청에 dpi가 실리는지 확인 (`tests/capture-source-rect.test.mjs`)
 - PDFium `FPDF_REVERSE_BYTE_ORDER` 출력(R,G,B,x)이 그대로 R,G,B,255가 되는지 확인
   (`tests/pdfium-pixels.test.mjs`)
+- 예기치 않은 `device.lost` 뒤 같은 캔버스에서 새 장치로 재구성·재업로드하고, 스스로
+  destroy한 장치는 재구성하지 않으며, WebGPU 캔버스에 2D context를 요청하지 않는지 확인
+  (`tests/gpu-device-loss.test.mjs`)
 
 실행:
 
@@ -29,7 +32,7 @@ pnpm run verify:release-contract
 pnpm --filter @pdfgpu/core test
 ```
 
-현재 core unit test는 43개입니다. 배포 리포트 파서 테스트 3개는 저장소 루트의
+현재 core unit test는 46개입니다. 배포 리포트 파서 테스트 3개는 저장소 루트의
 `tests/scripts/deploy-report.test.mjs`에 있습니다(`node --test tests/scripts/*.test.mjs`).
 
 WebGPU 경로는 Playwright 컨테이너에서 `backend: unsupported`로 떨어집니다.

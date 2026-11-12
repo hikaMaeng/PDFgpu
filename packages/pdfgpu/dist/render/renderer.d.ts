@@ -23,6 +23,21 @@ export declare class PageRenderer {
     private frameCanvas;
     private frameContext;
     private frameCount;
+    /** Canvas passed to `init`; kept so a lost device can be rebuilt on it. */
+    private targetCanvas;
+    /**
+     * True once `getContext('webgpu')` succeeded on the target canvas. Such a
+     * canvas can never return a 2D context, so the 2D fallback must not be
+     * attempted on it (it used to throw '2d context unavailable' every frame).
+     */
+    private canvasBoundToWebGpu;
+    private disposed;
+    private loggedUndrawable;
+    /**
+     * Called after a lost GPU device has been replaced and the renderer can draw
+     * again. The viewer wires this to a repaint; nothing is drawn until then.
+     */
+    onDeviceRestored: (() => void) | null;
     /**
      * GPU textures uploaded from raster sources.
      *
@@ -71,6 +86,14 @@ export declare class PageRenderer {
     releaseTexture(source: PdfImageSource): boolean;
     /** Destroys every GPU texture held by this renderer. */
     releaseAllTextures(): void;
+    /**
+     * Rebuilds the renderer on the same canvas when the GPU device is lost
+     * (GPU process restart, driver reset). Textures of the dead device are
+     * dropped without `destroy()` - they no longer exist - and re-uploaded from
+     * the raster cache on the next frames. A loss caused by our own `dispose()`
+     * (reason 'destroyed', or a device that is no longer current) is ignored.
+     */
+    private watchDeviceLoss;
     dispose(): void;
     private renderWebGpu;
     private getOrCreateTexture;

@@ -55,6 +55,21 @@ export class PageRenderer {
         this.frameCanvas = null;
         this.frameContext = null;
         this.frameCount = 0;
+        /** Canvas passed to `init`; kept so a lost device can be rebuilt on it. */
+        this.targetCanvas = null;
+        /**
+         * True once `getContext('webgpu')` succeeded on the target canvas. Such a
+         * canvas can never return a 2D context, so the 2D fallback must not be
+         * attempted on it (it used to throw '2d context unavailable' every frame).
+         */
+        this.canvasBoundToWebGpu = false;
+        this.disposed = false;
+        this.loggedUndrawable = false;
+        /**
+         * Called after a lost GPU device has been replaced and the renderer can draw
+         * again. The viewer wires this to a repaint; nothing is drawn until then.
+         */
+        this.onDeviceRestored = null;
         /**
          * GPU textures uploaded from raster sources.
          *
@@ -90,6 +105,7 @@ export class PageRenderer {
     async init(canvas) {
         if (this.isInitialized)
             return this._backend;
+        this.targetCanvas = canvas;
         const gpu = getNavigatorGpu();
         if (!gpu) {
             this.isInitialized = true;
@@ -101,13 +117,16 @@ export class PageRenderer {
                 this.isInitialized = true;
                 return this._backend;
             }
-            this.device = await adapter.requestDevice();
+            const device = await adapter.requestDevice();
+            this.device = device;
+            this.watchDeviceLoss(device);
             const format = gpu.getPreferredCanvasFormat();
             this.format = format;
             this.context = canvas.getContext('webgpu');
             if (!this.context) {
                 throw new Error('webgpu context unavailable');
             }
+            this.canvasBoundToWebGpu = true;
             this.context.configure({
                 device: this.device,
                 format,
@@ -153,8 +172,18 @@ export class PageRenderer {
             catch (error) {
                 this._backend = 'error';
                 this.initError = error instanceof Error ? error.message : 'webgpu render failed';
-                console.error('[pdfgpu] webgpu render failed; falling back to 2d', this.initError);
+                console.error('[pdfgpu] webgpu render failed', this.initError);
             }
+        }
+        if (this.canvasBoundToWebGpu) {
+            // A canvas that has a WebGPU context cannot hand out a 2D context. Keep
+            // the last presented image instead of throwing every frame; a lost
+            // device is rebuilt by `watchDeviceLoss`, which then requests a repaint.
+            if (!this.loggedUndrawable) {
+                this.loggedUndrawable = true;
+                console.warn('[pdfgpu] canvas is bound to webgpu and the device is unavailable; skipping frame', this.initError);
+            }
+            return;
         }
         this.render2d(canvas, frame);
     }
@@ -197,7 +226,46 @@ export class PageRenderer {
         this.gpuTextures.clear();
         this.gpuBytes = 0;
     }
+    /**
+     * Rebuilds the renderer on the same canvas when the GPU device is lost
+     * (GPU process restart, driver reset). Textures of the dead device are
+     * dropped without `destroy()` - they no longer exist - and re-uploaded from
+     * the raster cache on the next frames. A loss caused by our own `dispose()`
+     * (reason 'destroyed', or a device that is no longer current) is ignored.
+     */
+    watchDeviceLoss(device) {
+        const lost = device?.lost;
+        if (!lost || typeof lost.then !== 'function')
+            return;
+        void lost.then((info) => {
+            if (this.disposed || this.device !== device)
+                return;
+            if (info?.reason === 'destroyed')
+                return;
+            console.warn('[pdfgpu] webgpu device lost; rebuilding', info?.reason, info?.message);
+            this.gpuTextures.clear();
+            this.gpuBytes = 0;
+            this.vertexBuffer = null;
+            this.vertexBufferBytes = 0;
+            this.device = null;
+            this.pipeline = null;
+            this.sampler = null;
+            this._backend = 'error';
+            this.initError = `device lost: ${info?.message ?? info?.reason ?? 'unknown'}`;
+            this.isInitialized = false;
+            this.loggedUndrawable = false;
+            const canvas = this.targetCanvas;
+            if (!canvas)
+                return;
+            void this.init(canvas).then((backend) => {
+                if (backend === 'webgpu' && !this.disposed)
+                    this.onDeviceRestored?.();
+            });
+        });
+    }
     dispose() {
+        this.disposed = true;
+        this.onDeviceRestored = null;
         this.releaseAllTextures();
         this.releaseVertexBuffer();
         if (this.device) {
