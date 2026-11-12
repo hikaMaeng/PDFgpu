@@ -1,6 +1,6 @@
 {
   "name": "@pdfgpu/core",
-  "version": "0.1.9",
+  "version": "0.1.10",
   "description": "Provider-independent WebGPU PDF viewer core",
   "type": "module",
   "files": [
@@ -22,7 +22,7 @@
     "test": "npm run build && node --test tests/**/*.test.mjs"
   },
   "dependencies": {
-    "@embedpdf/pdfium": "2.14.0"
+    "@embedpdf/pdfium": "2.15.1"
   },
   "devDependencies": {
     "typescript": "5.9.3"

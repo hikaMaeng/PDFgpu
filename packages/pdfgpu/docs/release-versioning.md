@@ -2,16 +2,17 @@
 
 ## Current contract
 
-PDFGPU `0.1.0` has an exact runtime dependency contract:
+Every PDFGPU release has an exact runtime dependency contract:
 
 | Consumer release | PDFium package | Dependency specifier | Contract |
 | --- | --- | --- | --- |
-| `@pdfgpu/core@0.1.0` | `@embedpdf/pdfium@2.14.0` | `2.14.0` | [`release-contracts/pdfgpu/v0.1.0.json`](../../../release-contracts/pdfgpu/v0.1.0.json) |
+| `@pdfgpu/core@0.1.0`–`0.1.9` | `@embedpdf/pdfium@2.14.0` | `2.14.0` | [`v0.1.0.json`](../../../release-contracts/pdfgpu/v0.1.0.json) … [`v0.1.9.json`](../../../release-contracts/pdfgpu/v0.1.9.json) |
+| `@pdfgpu/core@0.1.10` | `@embedpdf/pdfium@2.15.1` | `2.15.1` | [`v0.1.10.json`](../../../release-contracts/pdfgpu/v0.1.10.json) |
 
 The contract covers more than `package.json`:
 
 - the exact dependency specifier in `packages/pdfgpu/package.json`;
-- the resolved version and integrity in `pnpm-lock.yaml`;
+- the resolved version and integrity in `package-lock.json`;
 - the PDFium JavaScript module import;
 - the PDFium WASM asset import used by `src/engine/pdfiumCore.ts` (loaded both on the main thread and inside each PDFium worker);
 - the installed PDFium package under `node_modules`;
@@ -35,16 +36,28 @@ versioned contract file.
 For every new release:
 
 1. Update `@embedpdf/pdfium` to the intended exact version.
-2. Run `pnpm install` so the lockfile resolution and integrity are refreshed.
+2. Run `npm install` so the lockfile resolution and integrity are refreshed, and compare
+   the lockfile integrity with `npm view <pkg>@<version> dist.integrity`.
 3. Bump every PDFGPU package version that is part of the release.
 4. Add `release-contracts/pdfgpu/v<PDFGPU-version>.json`; do not edit an older contract.
-5. Run `pnpm run verify:release-contract` and the core test suite.
+5. Run `npm run verify:release-contract` (also the first step of `npm run deploy`)
+   and the core test suite.
 6. Tag the PDFGPU release only after the contract, lockfile, and artifact agree.
 
 The `v0.1.0` tag therefore remains permanently associated with
 `@embedpdf/pdfium@2.14.0`. A future `@embedpdf/pdfium@2.14.1` or `2.14.4`
 must appear through a new PDFGPU release rather than silently changing the
 meaning of `v0.1.0`.
+
+## 0.1.10: PDFium 2.14.0 → 2.15.1
+
+Treated as a compatible update (patch bump), from a comparison of the published
+2.14.0 and 2.15.1 tarballs: one function added (`EPDF_GetPageBoxByIndex`), none
+removed; the 14 functions PDFGPU calls keep identical signatures; `init()` and the
+`./pdfium.wasm` export are unchanged. `pdfium.wasm` grew from 4,626,775 to 4,646,932
+bytes. No changelog for the package was found, so what changed inside the WASM is
+not known; rendering was re-verified by the e2e gate (colour order, tile grid,
+navigation) and in Chrome on the WebGPU path.
 
 ## Why the coupling is explicit
 

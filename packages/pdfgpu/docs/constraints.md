@@ -2,7 +2,7 @@
 
 - 뷰어는 브라우저 전용입니다. Node-only 환경에서는 DOM/WebGPU 표면을 만들 수 없습니다.
 - in-memory 공급자는 Chromium PDF viewer 계열의 오픈소스 PDFium을
-  WebAssembly로 빌드한 `@embedpdf/pdfium@2.14.0`을 사용합니다.
+  WebAssembly로 빌드한 `@embedpdf/pdfium@2.15.1`을 사용합니다.
 - in-memory 공급자의 PDFium은 Web Worker에서 돕니다. 워커마다 문서 전체 사본과
   PDFium 힙을 가지므로 메모리는 `poolSize`에 비례합니다. Vite로 번들할 때는
   `worker: { format: 'es' }`가 필요합니다(워커가 PDFium을 `import()`로 지연 로드).
@@ -15,7 +15,7 @@
   밖의 상대 경로 의존성을 둘 수 없습니다.
 - 소비자는 `dist` 파일을 복사하거나 `src`를 alias하지 말고 semver 버전과
   source commit이 기록된 package artifact를 사용해야 합니다.
-- PDFium WASM은 `@embedpdf/pdfium@2.14.0`의 고정 semver dependency에서만
+- PDFium WASM은 `@embedpdf/pdfium@2.15.1`의 고정 semver dependency에서만
   공급합니다. PDFium 버전을 변경할 때는 package 버전과 통합 manifest를
   함께 갱신해야 합니다.
 - `release-contracts/pdfgpu/v<PDFGPU-version>.json`은 PDFium dependency의

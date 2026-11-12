@@ -8,12 +8,12 @@
 - PDFit은 이 패키지를 `@pdfgpu/core`로만 import하고, 연동 시 `dist`를
   `npm pack`/`pnpm pack`한 tarball과 source commit을 manifest에 고정합니다.
 - in-memory PDF parsing/rasterization은 Chromium PDF viewer 계열의 PDFium
-  WebAssembly build인 `@embedpdf/pdfium@2.14.0`에 위임합니다. PDFGPU의
+  WebAssembly build인 `@embedpdf/pdfium@2.15.1`에 위임합니다. PDFGPU의
   고유 책임은 provider-independent viewer orchestration입니다.
 - PDFium 버전 계약은 `release-contracts/pdfgpu/v<version>.json`에 보존되며,
   `scripts/verify-release-contract.mjs`가 package, lockfile, WASM import와
   함께 검증합니다.
-- PDFium WASM은 `@embedpdf/pdfium@2.14.0` semver dependency로 해석되며,
+- PDFium WASM은 `@embedpdf/pdfium@2.15.1` semver dependency로 해석되며,
   코어 package가 형제 저장소의 파일 경로를 참조하지 않게 합니다.
 
 ## 소스 라우터

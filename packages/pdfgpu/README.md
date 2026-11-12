@@ -6,7 +6,7 @@
 </div>
 
 > The in-memory path is powered by
-> [`@embedpdf/pdfium@2.14.0`](https://www.embedpdf.com/docs/pdfium/getting-started),
+> [`@embedpdf/pdfium@2.15.1`](https://www.embedpdf.com/docs/pdfium/getting-started),
 > a WebAssembly build of [PDFium](https://github.com/chromium/pdfium), the
 > open-source PDF engine used by Chromium's PDF viewer. PDFGPU contributes the
 > viewer pipeline around this parser: progressive tiles, scheduling, caching,
@@ -84,7 +84,7 @@ PDFGPU `v0.1.0` is available as the exact
 
 ## PDFium dependency contract
 
-`@pdfgpu/core@0.1.0` requires exactly `@embedpdf/pdfium@2.14.0`.
+`@pdfgpu/core@0.1.10` requires exactly `@embedpdf/pdfium@2.15.1` (releases `0.1.0`–`0.1.9` used `2.14.0`).
 The dependency specifier, lockfile integrity, and WASM import path are checked
 by the [release contract](../../release-contracts/pdfgpu/v0.1.0.json) before
 build and test. A future PDFium update must ship as a new PDFGPU release and
@@ -103,7 +103,7 @@ new versioned contract.
 
 > In-memory 경로는 Chromium PDF viewer에 사용되는 오픈소스 PDFium의
 > WebAssembly 빌드인
-> [`@embedpdf/pdfium@2.14.0`](https://www.embedpdf.com/docs/pdfium/getting-started)을
+> [`@embedpdf/pdfium@2.15.1`](https://www.embedpdf.com/docs/pdfium/getting-started)을
 > 기반으로 합니다. PDFGPU는 parser를 다시 만들지 않고 progressive tile,
 > scheduling, caching, layout, composition을 그 위에 제공합니다.
 
@@ -173,7 +173,7 @@ PDFGPU `v0.1.0`은 정확한
 
 ## PDFium 의존성 계약
 
-`@pdfgpu/core@0.1.0`은 정확히 `@embedpdf/pdfium@2.14.0`을 요구합니다.
+`@pdfgpu/core@0.1.10`은 정확히 `@embedpdf/pdfium@2.15.1`을 요구합니다(`0.1.0`–`0.1.9`는 `2.14.0`).
 의존성 specifier, lockfile integrity, WASM import 경로는 빌드와 테스트 전에
 [릴리스 계약](../../release-contracts/pdfgpu/v0.1.0.json)으로 검증됩니다.
 향후 PDFium 업데이트는 반드시 새 PDFGPU 릴리스와 새 버전별 계약 파일로

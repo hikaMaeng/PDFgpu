@@ -19,7 +19,7 @@ PDFGPU is a provider-independent, progressive PDF viewer core for the modern web
 </div>
 
 > **Powered by PDFium.** PDFGPU's in-memory provider uses
-> [`@embedpdf/pdfium@2.14.0`](https://www.embedpdf.com/docs/pdfium/getting-started),
+> [`@embedpdf/pdfium@2.15.1`](https://www.embedpdf.com/docs/pdfium/getting-started),
 > a WebAssembly build of [PDFium](https://github.com/chromium/pdfium), the
 > open-source PDF engine used by Chromium's PDF viewer. PDFGPU does not replace
 > that parser with a JavaScript approximation; it adds progressive scheduling,
@@ -201,7 +201,7 @@ the provider and viewer contracts without coupling the library to one product.
 ## PDFium release contract
 
 `@pdfgpu/core@0.1.0` pins the in-memory parser and rasterizer to
-`@embedpdf/pdfium@2.14.0`. The dependency is exact in `package.json`, resolved
+`@embedpdf/pdfium@2.15.1`. The dependency is exact in `package.json`, resolved
 and integrity-pinned in `pnpm-lock.yaml`, and recorded in the immutable
 [v0.1.0 release contract](release-contracts/pdfgpu/v0.1.0.json).
 
@@ -252,7 +252,7 @@ release artifact and can advance on their own release schedule.
 </div>
 
 > **PDFium 기반.** PDFGPU의 in-memory provider는
-> [`@embedpdf/pdfium@2.14.0`](https://www.embedpdf.com/docs/pdfium/getting-started)을
+> [`@embedpdf/pdfium@2.15.1`](https://www.embedpdf.com/docs/pdfium/getting-started)을
 > 사용합니다. 이는 Chromium PDF viewer에 사용되는 오픈소스
 > [PDFium](https://github.com/chromium/pdfium)의 WebAssembly 빌드입니다.
 > PDFGPU는 JavaScript로 PDF parser를 다시 구현하지 않고, PDFium 위에
@@ -447,7 +447,7 @@ PDFGPU는 독립 라이브러리입니다. PDFit 같은 통합 프로젝트는 �
 ## PDFium 릴리스 계약
 
 `@pdfgpu/core@0.1.0`은 in-memory parser와 rasterizer로
-`@embedpdf/pdfium@2.14.0`을 사용합니다. 이 의존성은 `package.json`에서
+`@embedpdf/pdfium@2.15.1`을 사용합니다. 이 의존성은 `package.json`에서
 exact로 선언되고, `pnpm-lock.yaml`에서 resolution과 integrity가 고정되며,
 [v0.1.0 릴리스 계약](release-contracts/pdfgpu/v0.1.0.json)에 기록됩니다.
 

@@ -33,8 +33,8 @@
 실행:
 
 ```bash
-pnpm run verify:release-contract
-pnpm --filter @pdfgpu/core test
+npm run verify:release-contract
+npm run test -w packages/pdfgpu
 ```
 
 현재 core unit test는 56개입니다. 배포 리포트 파서 테스트 3개는 저장소 루트의
@@ -56,10 +56,10 @@ Playwright가 전달한 `[pdfgpu] render frame {... backend: X}` 로그를 세�
 `tests/reports/pdfgpu-frame-allocations/`에 남깁니다.
 
 Windows에서도 패키지 소유의 TypeScript
-devDependency와 `pnpm install`만으로 `dist`를 재생성할 수 있어야 하며, pack한
+devDependency와 `npm install`만으로 `dist`를 재생성할 수 있어야 하며, pack한
 tarball의 `files` 목록에는 `dist`, 문서, PDFium vendor 자산만 포함되어야 합니다.
 릴리스 계약 검증은 PDFGPU 버전, `@embedpdf/pdfium` exact dependency,
-`pnpm-lock.yaml` integrity, PDFium JS/WASM import 경로, 모든 workspace package
+`package-lock.json` integrity, PDFium JS/WASM import 경로, 모든 workspace package
 버전을 함께 확인합니다.
 
 ## Playwright 브라우저 테스트
