@@ -6,6 +6,26 @@ import {
   reduceViewerInteraction,
   viewerModeParts
 } from '../dist/viewer/interaction.js';
+import { buildLayout } from '../dist/layout/layout.js';
+
+/**
+ * 1-based first page of the spread row that holds `page`, read from the rows
+ * `buildLayout` actually produces (what the user sees), for both placements.
+ * Independent of normalizeViewerPage, so the test cannot agree with it by
+ * construction.
+ */
+function spreadRowLeader(page, pageCount) {
+  const sizes = new Map(Array.from({ length: pageCount }, (_, i) => [i, { baseWidth: 500, baseHeight: 700 }]));
+  const leaders = new Set();
+  for (const spreadPlacement of ['first-right', 'first-left']) {
+    const { pagePositions } = buildLayout(pageCount, sizes, 1, 16, { viewMode: 'spread', spreadPlacement, viewportWidth: 1200 });
+    const target = pagePositions.find((p) => p.index === page - 1);
+    const row = pagePositions.filter((p) => p.rowIndex === target.rowIndex);
+    leaders.add(Math.min(...row.map((p) => p.index)) + 1);
+  }
+  if (leaders.size !== 1) throw new Error(`placements disagree on the row of page ${page}`);
+  return [...leaders][0];
+}
 
 describe('viewer interaction matrix', () => {
   const modes = ['scroll', 'single', 'double'];
@@ -23,20 +43,35 @@ describe('viewer interaction matrix', () => {
         assert.equal(normalizeViewerPage(0, pageCount, mode), 1);
         assert.equal(
           normalizeViewerPage(pageCount + 99, pageCount, mode),
-          mode === 'double' && pageCount > 1
-            ? pageCount - (pageCount % 2 === 0 ? 1 : 0)
+          mode === 'double'
+            ? spreadRowLeader(Math.max(1, pageCount), pageCount)
             : Math.max(1, pageCount)
         );
-        if (mode === 'double' && pageCount >= 2) {
-          assert.equal(normalizeViewerPage(2, pageCount, mode), 1);
-          assert.equal(normalizeViewerPage(4, pageCount, mode), pageCount >= 3 ? 3 : 1);
+        if (mode === 'double' && pageCount >= 1) {
+          for (let page = 1; page <= pageCount; page += 1) {
+            assert.equal(
+              normalizeViewerPage(page, pageCount, mode),
+              spreadRowLeader(page, pageCount),
+              `page ${page} of ${pageCount} does not land on the first page of its spread row`
+            );
+          }
         }
       }
     }
   });
 
-  it('uses one keyboard contract across modes', () => {
-    for (const mode of modes) {
+  it('turns page keys into navigation in page modes only', () => {
+    // docs/architecture.md: "scroll은 native scroll을 유지하고 single/double은 threshold
+    // wheel과 PageUp/PageDown을 bounded navigation effect로 변환".
+    for (const key of ['PageDown', 'PageUp', 'ArrowDown', 'ArrowUp']) {
+      const scroll = reduceViewerInteraction(
+        createViewerInteractionState({ page: 3, pageCount: 6, mode: 'scroll' }),
+        { type: 'key', key }
+      );
+      assert.equal(scroll.preventDefault, false, `${key} was taken from native scrolling`);
+      assert.deepEqual(scroll.effects, []);
+    }
+    for (const mode of ['single', 'double']) {
       const step = mode === 'double' ? 2 : 1;
       for (const page of [1, 2, 3, 5]) {
         const state = createViewerInteractionState({ page, pageCount: 6, mode });
@@ -87,13 +122,13 @@ describe('viewer interaction matrix', () => {
 
   it('separates Ctrl+wheel zoom from page movement', () => {
     for (const mode of modes) {
-      const transition = reduceViewerInteraction(
-        createViewerInteractionState({ page: 3, pageCount: 6, mode }),
-        { type: 'wheel', deltaY: -1, ctrlKey: true }
-      );
+      const initial = createViewerInteractionState({ page: 3, pageCount: 6, mode });
+      const transition = reduceViewerInteraction(initial, { type: 'wheel', deltaY: -1, ctrlKey: true });
       assert.equal(transition.preventDefault, true);
       assert.deepEqual(transition.effects, [{ type: 'zoom', direction: 'in' }]);
-      assert.equal(transition.state.page, 3);
+      // Ctrl+wheel zooms; it must not move the page (page 3 is itself
+      // normalized to its spread row's first page, 2, in double mode).
+      assert.equal(transition.state.page, initial.page);
     }
   });
 });

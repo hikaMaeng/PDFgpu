@@ -68,11 +68,12 @@
 - 스크롤/줌/페이지 점프는 raster IO를 기다리지 않습니다. viewport는 manifest 기반 page shell을 즉시 이동시키고, background loader가 완료한 이미지만 cache에서 canvas로 합성합니다.
 - background loader는 pending task 우선순위를 계속 갱신하지만 진행 중 IO를 UI thread의 인터랙션 완료 조건으로 삼지 않습니다.
 - 대규모 문서에서도 scheduler는 전체 페이지 preview를 큐에 넣지 않습니다. 현재 active/visible/근접 page만 후보로 만들어 스크롤당 작업량을 viewport 크기에 비례시킵니다.
-- in-memory PDFium은 아직 실제 Web Worker가 아니라 main thread WASM 경로입니다. 그래서 viewer는 고속 입력 중 새 raster 시작을 멈추고, 입력이 잠잠해진 뒤 1개씩 진행해 스크롤 응답성을 우선합니다.
+- in-memory PDFium은 Web Worker 풀에서 래스터화합니다(워커를 못 만들면 main thread fallback). viewer는 고속 입력 중 새 raster 시작을 멈추고, 입력이 잠잠해진 뒤 엔진 `queueDepth`만큼 병렬로 진행합니다.
 - `viewer/interaction.ts`는 순수 상태 reducer입니다. `scroll`은 native scroll을
   유지하고 `single`/`double`은 threshold wheel과 PageUp/PageDown을 bounded
-  navigation effect로 변환합니다. UI 프레임워크는 이 reducer의 source of truth가
-  아닙니다.
+  navigation effect로 변환합니다. 컨트롤러가 viewport의 `wheel`과 `keydown`을 이
+  reducer로 보냅니다(입력란 등 편집 가능한 대상의 키는 가로채지 않음). UI 프레임워크는
+  이 reducer의 source of truth가 아닙니다.
 
 ## 4) Render Layer (`render/`)
 

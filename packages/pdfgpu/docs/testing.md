@@ -37,7 +37,7 @@ pnpm run verify:release-contract
 pnpm --filter @pdfgpu/core test
 ```
 
-현재 core unit test는 55개입니다. 배포 리포트 파서 테스트 3개는 저장소 루트의
+현재 core unit test는 56개입니다. 배포 리포트 파서 테스트 3개는 저장소 루트의
 `tests/scripts/deploy-report.test.mjs`에 있습니다(`node --test tests/scripts/*.test.mjs`).
 
 WebGPU 경로는 Playwright 컨테이너에서 `backend: unsupported`로 떨어집니다.
@@ -72,6 +72,10 @@ tarball의 `files` 목록에는 `dist`, 문서, PDFium vendor 자산만 포함�
   위치가 PDF content stream 순서대로 빨강·초록·파랑인지 확인
   (`tests/playwright/pdfgpu-color-order.spec.js`). 흑백 샘플은 R/B가 바뀌어도 똑같이
   보이므로 어두운 픽셀 검사로는 채널 순서를 볼 수 없습니다.
+- 실제 키 입력으로 single/spread 페이지 모드의 PageDown/PageUp/화살표 이동(스프레드는
+  1, 2, 4, 6 착지), continuous 모드에서 키를 가로채지 않음, 상태의 Visible 목록이 뷰어와
+  겹치는 shell과 같음을 확인 (`tests/playwright/pdfgpu-navigation.spec.js`). 리듀서 단위
+  테스트만으로는 키 분기에 실제로 도달하는지 증명할 수 없어서 브라우저에서 누릅니다.
 - zoom 조작 시 `renderQuality` 갱신 확인
 - `fitWidth`, `fitHeight`, `fitPage` 조작 시 상태 갱신 확인
 - detail image DPI 슬라이더 조작 시 status의 `DPI` 값과 detail 렌더 요청 버킷 갱신 확인

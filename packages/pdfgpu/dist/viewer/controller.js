@@ -1,4 +1,4 @@
-import { buildLayout, resolveViewportWindow, visiblePageIndices } from '../layout/layout.js';
+import { buildLayout, resolveViewportWindow, visiblePageIndices, windowPageIndices } from '../layout/layout.js';
 import { findPageAtViewportPoint, projectOverlaysForVisiblePages, screenRectToAbsoluteRect } from './coordinates.js';
 import { RasterCache, cacheKey } from '../scheduler/byteBudgetCache.js';
 import { PageRenderer } from '../render/renderer.js';
@@ -48,6 +48,8 @@ class PdfGpuViewerControllerImpl {
         this.activePageIndex = undefined;
         this.pageSizes = [];
         this.visiblePages = [];
+        /** Pages in the overscan window; shells stay laid out for these while scrolling. */
+        this.windowPages = [];
         this.initialPreviewPages = new Set();
         this.pendingLayout = false;
         this.queuePumpScheduled = false;
@@ -67,7 +69,8 @@ class PdfGpuViewerControllerImpl {
             if (this.disposed || this.state.loading || !this.manifest)
                 return;
             const window = resolveViewportWindow(this.layout.pagePositions, this.viewport.clientHeight || 1, this.viewport.scrollTop, this.overscanPages);
-            this.visiblePages = visiblePageIndices(this.layout.pagePositions, window);
+            this.windowPages = windowPageIndices(this.layout.pagePositions, window);
+            this.visiblePages = visiblePageIndices(this.layout.pagePositions, window, this.viewport.scrollTop, this.viewport.clientHeight || 1);
             if (this.state.loadPhase === 'rendering' && this.initialPreviewPages.size === 0) {
                 this.initialPreviewPages = new Set(this.visiblePages);
                 this.updateLoadProgress();
@@ -117,6 +120,25 @@ class PdfGpuViewerControllerImpl {
                 else if (effect.type === 'navigate') {
                     this.scrollToPage(effect.page - 1);
                 }
+            }
+        };
+        this.onKeyDown = (event) => {
+            if (event.defaultPrevented || event.altKey || event.ctrlKey || event.metaKey)
+                return;
+            const target = event.target;
+            const editableTarget = !!target
+                && (target.isContentEditable || /^(INPUT|TEXTAREA|SELECT)$/.test(target.tagName));
+            const transition = reduceViewerInteraction(this.interaction, {
+                type: 'key',
+                key: event.key,
+                editableTarget,
+            });
+            this.interaction = transition.state;
+            if (transition.preventDefault)
+                event.preventDefault();
+            for (const effect of transition.effects) {
+                if (effect.type === 'navigate')
+                    this.scrollToPage(effect.page - 1);
             }
         };
         this.onResize = () => {
@@ -401,6 +423,7 @@ class PdfGpuViewerControllerImpl {
         this.listeners.clear();
         this.viewport.removeEventListener('scroll', this.onScroll);
         this.viewport.removeEventListener('wheel', this.onWheel);
+        this.viewport.removeEventListener('keydown', this.onKeyDown);
         window.removeEventListener('resize', this.onResize);
         this.renderer.dispose();
         this.engine.dispose();
@@ -687,7 +710,7 @@ class PdfGpuViewerControllerImpl {
     applyVisibleShells() {
         if (!this.manifest)
             return;
-        const keep = this.computeShellWindowPages(this.visiblePages, this.activePageIndex);
+        const keep = this.computeShellWindowPages([...this.windowPages, ...this.visiblePages], this.activePageIndex);
         const keepSet = new Set(keep);
         const seen = new Set(keep);
         for (const index of keep) {
@@ -1144,6 +1167,9 @@ class PdfGpuViewerControllerImpl {
     bindEvents() {
         this.viewport.addEventListener('scroll', this.onScroll);
         this.viewport.addEventListener('wheel', this.onWheel, { passive: false });
+        // Keyboard paging (PageUp/PageDown/arrows in single/double). The reducer
+        // already handled 'key' events, but nothing dispatched them.
+        this.viewport.addEventListener('keydown', this.onKeyDown);
         window.addEventListener('resize', this.onResize);
     }
     setContainerAria() {

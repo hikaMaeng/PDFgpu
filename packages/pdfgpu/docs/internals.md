@@ -95,6 +95,25 @@ preview로 남습니다. zoom 0.5 / 1 / 2 회귀 테스트가
   않습니다. React 소비자가 같은 상태로 매 프레임 전체를 다시 렌더링하던 것을
   막기 위한 것입니다. 상태에 중첩 객체가 없으므로 제자리 수정이 묻힐 일은 없습니다.
 
+## 보이는 페이지
+
+- `visiblePages`는 뷰포트 `[scrollTop, scrollTop + clientHeight)`와 실제로 겹치는
+  페이지입니다(`layout.ts` `visiblePageIndices`). 디테일 타일 발주와 합성은 이 페이지에만
+  합니다. 오버스캔 창(위아래 뷰포트 `overscanPages`개) 전체는 `windowPageIndices`로 따로
+  구해 page shell을 미리 배치하는 데만 씁니다.
+- 이전 필터 `top + height >= 0`은 문서 좌표에서 항상 참이라 오버스캔 창 전체가
+  "보이는" 페이지였습니다. 크롬 실측(110%, scrollTop 5000, 화면 위 페이지 2개): 디테일
+  요청 89건 중 60건이 화면 밖 페이지 → 수정 후 40건 전부 화면 위.
+
+## 스프레드 행과 페이지 이동
+
+- 스프레드 행은 두 배치 모두 [1], [2,3], [4,5], …(1 기준)입니다. `normalizeViewerPage`는
+  double 모드에서 페이지를 그 행의 첫 페이지로 보냅니다(1, 2, 4, 6, …). 이전 규칙(홀수가
+  행 선두)은 3페이지를 행 [2,3]의 오른쪽에 착지시키고 2페이지를 1로 되돌렸습니다.
+- 키보드: 컨트롤러가 viewport `keydown`을 reducer로 보냅니다. `single`/`double`에서
+  PageUp/PageDown/화살표가 페이지 이동이 되고, `scroll`에서는 가로채지 않아 브라우저의
+  기본 스크롤이 동작합니다. 편집 가능한 대상의 키와 Ctrl/Alt/Meta 조합은 무시합니다.
+
 ## 큐
 
 - 스크롤/줌은 입력 debounce 없이 다음 animation frame에서 즉시 viewport/window를 갱신합니다.

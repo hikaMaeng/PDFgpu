@@ -1,4 +1,4 @@
-import { buildLayout, resolveViewportWindow, visiblePageIndices, type LayoutMetrics } from '../layout/layout.js';
+import { buildLayout, resolveViewportWindow, visiblePageIndices, windowPageIndices, type LayoutMetrics } from '../layout/layout.js';
 import { findPageAtViewportPoint, projectOverlaysForVisiblePages, screenRectToAbsoluteRect } from './coordinates.js';
 import { RasterCache, cacheKey } from '../scheduler/byteBudgetCache.js';
 import { PageRenderer } from '../render/renderer.js';
@@ -105,6 +105,8 @@ class PdfGpuViewerControllerImpl implements PdfGpuViewerController, PdfGpuCaptur
   private activePageIndex: number | undefined = undefined;
   private pageSizes: Array<{ width: number; height: number }> = [];
   private visiblePages: number[] = [];
+  /** Pages in the overscan window; shells stay laid out for these while scrolling. */
+  private windowPages: number[] = [];
   private initialPreviewPages = new Set<number>();
   private pendingLayout = false;
   private queuePumpScheduled = false;
@@ -411,6 +413,7 @@ class PdfGpuViewerControllerImpl implements PdfGpuViewerController, PdfGpuCaptur
 
     this.viewport.removeEventListener('scroll', this.onScroll);
     this.viewport.removeEventListener('wheel', this.onWheel);
+    this.viewport.removeEventListener('keydown', this.onKeyDown);
     window.removeEventListener('resize', this.onResize);
 
     this.renderer.dispose();
@@ -536,7 +539,13 @@ class PdfGpuViewerControllerImpl implements PdfGpuViewerController, PdfGpuCaptur
       this.viewport.scrollTop,
       this.overscanPages
     );
-    this.visiblePages = visiblePageIndices(this.layout.pagePositions, window);
+    this.windowPages = windowPageIndices(this.layout.pagePositions, window);
+    this.visiblePages = visiblePageIndices(
+      this.layout.pagePositions,
+      window,
+      this.viewport.scrollTop,
+      this.viewport.clientHeight || 1
+    );
     if (this.state.loadPhase === 'rendering' && this.initialPreviewPages.size === 0) {
       this.initialPreviewPages = new Set(this.visiblePages);
       this.updateLoadProgress();
@@ -747,7 +756,7 @@ class PdfGpuViewerControllerImpl implements PdfGpuViewerController, PdfGpuCaptur
 
   private applyVisibleShells() {
     if (!this.manifest) return;
-    const keep = this.computeShellWindowPages(this.visiblePages, this.activePageIndex);
+    const keep = this.computeShellWindowPages([...this.windowPages, ...this.visiblePages], this.activePageIndex);
     const keepSet = new Set<number>(keep);
     const seen = new Set<number>(keep);
 
@@ -1241,6 +1250,23 @@ class PdfGpuViewerControllerImpl implements PdfGpuViewerController, PdfGpuCaptur
     }
   };
 
+  private onKeyDown = (event: KeyboardEvent) => {
+    if (event.defaultPrevented || event.altKey || event.ctrlKey || event.metaKey) return;
+    const target = event.target as HTMLElement | null;
+    const editableTarget = !!target
+      && (target.isContentEditable || /^(INPUT|TEXTAREA|SELECT)$/.test(target.tagName));
+    const transition = reduceViewerInteraction(this.interaction, {
+      type: 'key',
+      key: event.key,
+      editableTarget,
+    });
+    this.interaction = transition.state;
+    if (transition.preventDefault) event.preventDefault();
+    for (const effect of transition.effects) {
+      if (effect.type === 'navigate') this.scrollToPage(effect.page - 1);
+    }
+  };
+
   private markActiveInteraction() {
     this.interactionUntil = performance.now() + INTERACTION_IDLE_MS;
   }
@@ -1260,6 +1286,9 @@ class PdfGpuViewerControllerImpl implements PdfGpuViewerController, PdfGpuCaptur
   private bindEvents() {
     this.viewport.addEventListener('scroll', this.onScroll);
     this.viewport.addEventListener('wheel', this.onWheel, { passive: false });
+    // Keyboard paging (PageUp/PageDown/arrows in single/double). The reducer
+    // already handled 'key' events, but nothing dispatched them.
+    this.viewport.addEventListener('keydown', this.onKeyDown);
     window.addEventListener('resize', this.onResize);
   }
 

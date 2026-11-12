@@ -48,7 +48,12 @@ export function normalizeViewerPage(page: number, pageCount: number, mode: Viewe
   if (count === 0) return 1;
   const clamped = Math.max(1, Math.min(count, Math.floor(Number.isFinite(page) ? page : 1)));
   if (mode !== 'double') return clamped;
-  return clamped % 2 === 0 ? clamped - 1 : clamped;
+  // Spread rows from `buildLayout`: page 1 alone, then (2,3), (4,5), ... in both
+  // placements. A page normalizes to the first page of its row. The old rule
+  // (odd pages lead) paired (2,3) as (1) + (3,4): page 3 landed on the right half
+  // of its row and page 2 jumped back to page 1.
+  if (clamped <= 1) return 1;
+  return clamped % 2 === 0 ? clamped : clamped - 1;
 }
 
 export function viewerPageStep(mode: ViewerMode): number {
@@ -100,6 +105,9 @@ export function reduceViewerInteraction(
 
   if (event.type === 'key') {
     if (event.editableTarget) return { state, effects, preventDefault: false };
+    // Continuous scroll keeps native keyboard scrolling (architecture.md: "scroll은
+    // native scroll을 유지"); only page modes turn keys into page navigation.
+    if (state.mode === 'scroll') return { state, effects, preventDefault: false };
     if (event.key === 'ArrowLeft' || event.key === 'ArrowUp' || event.key === 'PageUp') {
       state.page = normalizeViewerPage(state.page - viewerPageStep(state.mode), state.pageCount, state.mode);
       effects.push({ type: 'navigate', page: state.page });

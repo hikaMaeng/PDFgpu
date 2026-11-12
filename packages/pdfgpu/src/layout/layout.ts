@@ -206,12 +206,37 @@ export function resolveViewportWindow(
   return { from: start, to: end };
 }
 
-export function visiblePageIndices(positions: PositionedPage[], window: ViewportWindow): number[] {
+/** Every page in the overscan window (used to keep page shells laid out ahead of scrolling). */
+export function windowPageIndices(positions: PositionedPage[], window: ViewportWindow): number[] {
+  const result: number[] = [];
+  for (let i = window.from; i <= window.to; i += 1) {
+    const item = positions[i];
+    if (item) result.push(item.index);
+  }
+  return result;
+}
+
+/**
+ * Pages that actually intersect the viewport `[scrollTop, scrollTop + viewportHeight)`.
+ *
+ * Only these get detail tiles and are composited ("화면에 보이는 페이지만 고해상도
+ * detail tile로 보강", README). The previous filter `top + height >= 0` is always true
+ * in document coordinates, so every page of the overscan window (two viewports above
+ * and below) counted as visible and received full-page detail tiles.
+ */
+export function visiblePageIndices(
+  positions: PositionedPage[],
+  window: ViewportWindow,
+  scrollTop: number,
+  viewportHeight: number
+): number[] {
+  const viewTop = scrollTop;
+  const viewBottom = scrollTop + Math.max(1, viewportHeight);
   const result: number[] = [];
   for (let i = window.from; i <= window.to; i += 1) {
     const item = positions[i];
     if (!item) continue;
-    if (item.top + item.height >= 0) {
+    if (item.top < viewBottom && item.top + item.height > viewTop) {
       result.push(item.index);
     }
   }

@@ -1,6 +1,6 @@
 import assert from 'node:assert/strict';
 import { describe, it } from 'node:test';
-import { buildLayout, resolveViewportWindow, visiblePageIndices } from '../dist/layout/layout.js';
+import { buildLayout, resolveViewportWindow, visiblePageIndices, windowPageIndices } from '../dist/layout/layout.js';
 import { RasterCache } from '../dist/scheduler/byteBudgetCache.js';
 import { buildRenderQueue, detailSourceScale } from '../dist/scheduler/queue.js';
 import { normalizeDetailDpi } from '../dist/engine/dpi.js';
@@ -43,8 +43,21 @@ describe('layout calculations', () => {
     ]);
     const layout = buildLayout(3, map, 1, 16);
     const window = resolveViewportWindow(layout.pagePositions, 600, 650, 1);
-    const visible = visiblePageIndices(layout.pagePositions, window);
-    assert.deepEqual(visible, [0, 1, 2]);
+    assert.deepEqual(windowPageIndices(layout.pagePositions, window), [0, 1, 2]);
+  });
+
+  it('counts as visible only the pages that intersect the viewport', () => {
+    // Pages are 700px tall with a 16px gap: page 0 = 0..700, page 1 = 716..1416,
+    // page 2 = 1432..2132. A 600px viewport at scrollTop 650 spans 650..1250, so by
+    // plain interval intersection pages 0 and 1 are on screen and page 2 is not.
+    const map = new Map([0, 1, 2].map((i) => [i, { baseWidth: 500, baseHeight: 700 }]));
+    const layout = buildLayout(3, map, 1, 16);
+    const window = resolveViewportWindow(layout.pagePositions, 600, 650, 1);
+    assert.deepEqual(visiblePageIndices(layout.pagePositions, window, 650, 600), [0, 1]);
+    // Entirely inside page 1.
+    assert.deepEqual(visiblePageIndices(layout.pagePositions, window, 800, 400), [1]);
+    // The 16px gap between pages 1 and 2 plus the edges of both.
+    assert.deepEqual(visiblePageIndices(layout.pagePositions, window, 1410, 30), [1, 2]);
   });
 });
 
