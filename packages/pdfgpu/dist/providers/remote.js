@@ -21,16 +21,22 @@ class WebApiPdfRasterProvider {
          */
         this.queueDepth = 3;
         this.documentId = null;
+        this.openGeneration = 0;
         this.endpoint = endpoint.replace(/\/+$/, '');
     }
     async open(source) {
+        const generation = ++this.openGeneration;
         const bytes = await sourceToBase64(source);
+        if (generation !== this.openGeneration)
+            throw new DOMException('open aborted', 'AbortError');
         const response = await fetch(`${this.endpoint}/documents`, {
             method: 'POST',
             headers: JSON_HEADERS,
             body: JSON.stringify({ bytes })
         });
         const body = await readJson(response);
+        if (generation !== this.openGeneration)
+            throw new DOMException('open aborted', 'AbortError');
         this.documentId = body.documentId;
         return { ...body.manifest, documentId: body.documentId };
     }
@@ -63,6 +69,7 @@ class WebApiPdfRasterProvider {
         return remoteImageToRaster(await readJson(response));
     }
     dispose() {
+        this.openGeneration += 1;
         this.documentId = null;
     }
     requireDocumentId() {
@@ -83,12 +90,18 @@ class WebSocketPdfRasterProvider {
         this.documentId = null;
         this.socketPromise = null;
         this.sequence = 0;
+        this.openGeneration = 0;
         this.pending = new Map();
         this.endpoint = endpoint;
     }
     async open(source) {
+        const generation = ++this.openGeneration;
         const bytes = await sourceToBase64(source);
+        if (generation !== this.openGeneration)
+            throw new DOMException('open aborted', 'AbortError');
         const response = await this.rpc({ method: 'open', payload: { bytes } });
+        if (generation !== this.openGeneration)
+            throw new DOMException('open aborted', 'AbortError');
         this.documentId = response.documentId;
         return { ...response.manifest, documentId: response.documentId };
     }
@@ -119,6 +132,7 @@ class WebSocketPdfRasterProvider {
         return remoteImageToRaster(response);
     }
     dispose() {
+        this.openGeneration += 1;
         this.documentId = null;
         if (this.socketPromise) {
             this.socketPromise.then((socket) => socket.close()).catch(() => { });

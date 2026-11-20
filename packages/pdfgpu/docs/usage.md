@@ -37,5 +37,5 @@ const wsProvider = createWebSocketPdfRasterProvider('ws://localhost:51000/ws/pdf
 
 ## 교체 / 해제
 
-- 새 문서를 로드하면 이전 렌더 큐와 in-flight 태스크는 즉시 취소됩니다.
+- 새 문서를 로드하면 이전 화면의 후속 렌더를 멈추고, 늦게 도착한 이전 문서의 래스터는 폐기합니다.
 - `dispose()`는 공급자/랜더러/캐시를 정리합니다.

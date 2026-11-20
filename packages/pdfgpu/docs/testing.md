@@ -6,7 +6,7 @@
 - preview 생성
 - tile 생성
 - abort 전파
-- `PdfRasterProvider` 호환 객체가 viewer 큐에서 사용되는지 확인
+- `PdfRasterProvider` 호환 객체가 뷰어에서 사용되는지 확인
 - 문서 교체 시 큐 정리
 - DPI 버킷 반올림
 - byte-budget eviction
@@ -94,11 +94,11 @@ tarball의 `files` 목록에는 `dist`, 문서, PDFium vendor 자산만 포함�
 - 스크롤 후 visible/active 페이지 detail 타일 재배치 확인
 - 빠른 스크롤/ctrl-wheel 입력 후 queue 과부하 없이 canvas와 page shell이 유지되는지 확인
 - 로딩 전 페이지 shell placeholder가 유지되고, cache 도착 후 canvas 합성으로 교체되는 구조 확인
-- 500페이지급 queue 생성에서 원거리 preview가 등록되지 않고 active/visible/근접 page만 후보가 되는지 확인
+- 화면 프리뷰의 즉시 발행, 상세 200ms, 프리캐시 500ms, 워커당 한 건, 문서 및 화면 전환을 제어된 시간으로 검증 (`tests/progressive-scheduler.test.mjs`)
 - 파일 업로드 재로딩 시 이전 문서 잔상 없음 확인
 - WebGPU 미지원 브라우저 노출 경로 확인(브라우저 환경 별도)
 
-- webapi 공급자의 detail 타일 요청 좌표가 zoom 1.0/1.46/2.14에서 엔진 native raster를 벗어나지 않고 격자가 raster 끝까지 닿는지 확인
+- Web API의 상세 요청이 zoom 1.0/1.46/2.14에서 viewport와 겹치는 native raster 타일을 빠짐없이 요청하는지 확인
 
 기본 스펙은 `tests/playwright/pdfgpu-viewer.spec.js`, 타일 좌표계 스펙은
 `tests/playwright/pdfgpu-detail-tiles.spec.js`에 있습니다. `tests/e2e/run-e2e.sh`는

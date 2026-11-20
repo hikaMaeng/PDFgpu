@@ -60,7 +60,7 @@ async function readZoom(status) {
   return Number(match[1]) / 100;
 }
 
-test('detail tile grid matches the engine raster at every zoom', async ({ page }) => {
+test('detail tiles cover the visible part of the engine raster at every zoom', async ({ page }) => {
   const base = process.env.TEST_URL || 'http://localhost:51000';
   const openCall = captureManifest(page);
   const tileRequests = collectTileRequests(page);
@@ -96,36 +96,33 @@ test('detail tile grid matches the engine raster at every zoom', async ({ page }
     await expect(status).toContainText(`DPI: ${step.dpi}`);
     const zoom = await readZoom(status);
 
-    tileRequests.length = 0;
-    await page.mouse.move(640, 400);
-    await page.mouse.wheel(0, 30);
-    await page.waitForTimeout(3000);
-
-    const detail = tileRequests.filter(
-      (item) => item.pageIndex === 0 && Number.isFinite(item.tileX) && item.dpi === step.dpi
-    );
-    expect(detail.length, `no detail tiles requested at zoom ${zoom} dpi ${step.dpi}`).toBeGreaterThan(0);
-
-    // Engine raster size: round(pts * dpi / 72), independent of zoom.
+    const region = page.getByRole('region', { name: 'PDF viewer' });
+    const detail = () => tileRequests.filter((item) => item.pageIndex === 0 && item.dpi === step.dpi);
+    await expect.poll(() => detail().length, { message: `DPI ${step.dpi} must produce detail tiles` }).toBeGreaterThan(0);
+    const bounds = await region.evaluate((element) => {
+      const shell = element.querySelector('[data-testid="pdfgpu-page-shell"][data-page-index="0"]');
+      return {
+        pageLeft: parseFloat(shell.style.left), pageTop: parseFloat(shell.style.top),
+        pageWidth: parseFloat(shell.style.width), pageHeight: parseFloat(shell.style.height),
+        viewportTop: element.scrollTop, viewportWidth: element.clientWidth, viewportHeight: element.clientHeight,
+      };
+    });
     const nativeWidth = Math.round(firstPage.widthPts * step.dpi / POINTS_PER_INCH);
     const nativeHeight = Math.round(firstPage.heightPts * step.dpi / POINTS_PER_INCH);
-    const expectedRight = Math.ceil(nativeWidth / TILE_SIZE) * TILE_SIZE;
-    const expectedBottom = Math.ceil(nativeHeight / TILE_SIZE) * TILE_SIZE;
-
-    const outside = detail.filter((item) => item.tileX >= nativeWidth || item.tileY >= nativeHeight);
-    expect(
-      outside,
-      `zoom ${zoom}: ${outside.length}/${detail.length} tiles start outside the ${nativeWidth}x${nativeHeight} raster`
-    ).toEqual([]);
-
-    const maxRight = Math.max(...detail.map((item) => item.tileX + TILE_SIZE));
-    const maxBottom = Math.max(...detail.map((item) => item.tileY + TILE_SIZE));
-    expect(maxRight, `zoom ${zoom}: grid right edge`).toBe(expectedRight);
-    expect(maxBottom, `zoom ${zoom}: grid bottom edge`).toBe(expectedBottom);
-
-    observed.push(
-      `zoom ${zoom.toFixed(2)} dpi ${step.dpi}: ${detail.length} tiles, raster ${nativeWidth}x${nativeHeight}, grid ${maxRight}x${maxBottom}`
-    );
+    const scale = (step.dpi / 96) / (bounds.pageWidth / Math.round(firstPage.widthPts * 96 / POINTS_PER_INCH));
+    const left = Math.max(0, -bounds.pageLeft) * scale;
+    const top = Math.max(0, bounds.viewportTop - bounds.pageTop) * scale;
+    const right = Math.min(nativeWidth, Math.min(bounds.pageWidth, bounds.viewportWidth - bounds.pageLeft) * scale);
+    const bottom = Math.min(nativeHeight, Math.min(bounds.pageHeight, bounds.viewportTop + bounds.viewportHeight - bounds.pageTop) * scale);
+    const expected = [];
+    for (let y = 0; y < nativeHeight; y += TILE_SIZE) {
+      for (let x = 0; x < nativeWidth; x += TILE_SIZE) {
+        if (x < right && x + TILE_SIZE > left && y < bottom && y + TILE_SIZE > top) expected.push(`${x},${y}`);
+      }
+    }
+    await expect.poll(() => [...new Set(detail().map(({ tileX, tileY }) => `${tileX},${tileY}`))].sort())
+      .toEqual(expected.sort());
+    observed.push(`zoom ${zoom.toFixed(2)} dpi ${step.dpi}: ${expected.length} tiles in viewport, raster ${nativeWidth}x${nativeHeight}`);
   }
 
   for (const line of observed) {

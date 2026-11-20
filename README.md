@@ -41,7 +41,7 @@ application choose where PDF parsing and rendering should run.
 - **GPU-first, resilient fallback** — compose visible tiles with WebGPU when it
   is available and keep the same frame pipeline on Canvas 2D when it is not.
 - **Built for large documents** — visibility-aware scheduling, cancellation,
-  bounded queues, and byte-budgeted LRU caching keep work tied to the viewport.
+  one request per viewer worker, and byte-budgeted raster caches keep work tied to the viewport.
 - **Easy to embed** — the core has no React dependency and exposes a
   framework-independent interaction reducer for application adapters.
 
@@ -273,7 +273,7 @@ PDFGPU는 반대로 작은 raster 계약을 제공하고, PDF 파싱과 렌더�
   WebSocket 서비스를 뷰어 교체 없이 사용할 수 있습니다.
 - **GPU 우선이면서 안전합니다.** WebGPU가 가능하면 visible tile을 합성하고,
   불가능하면 같은 frame pipeline을 Canvas 2D로 유지합니다.
-- **대형 문서를 고려했습니다.** 가시성 기반 스케줄링, 취소, bounded queue,
+- **대형 문서를 고려했습니다.** 가시성 기반 스케줄링, 워커당 요청 한 건,
   byte-budget LRU cache로 작업량을 viewport에 맞춥니다.
 - **삽입하기 쉽습니다.** 코어는 React에 의존하지 않으며 애플리케이션
   adapter가 사용할 수 있는 프레임워크 독립 interaction reducer를 제공합니다.

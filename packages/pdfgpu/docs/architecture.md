@@ -25,7 +25,7 @@
 | `src/layout` | manifest-driven page positioning |
 | `src/providers` | in-memory, HTTP, and WebSocket raster providers |
 | `src/render` | WebGPU/2D frame composition |
-| `src/scheduler` | byte-budget cache and bounded render queue |
+| `src/scheduler` | latest viewport scheduling and byte-budgeted raster caches |
 | `src/types` | PDFium module declarations and public type support |
 | `src/viewer` | controller and framework-independent interaction reducer |
 
@@ -42,19 +42,14 @@
 ## 2) Scheduler Layer (`scheduler/`)
 
 - 캐시 키: `kind/pageIndex/dpiBucket/tileX/tileY`
-- 캐시 예산: 기본 192MB
-- LRU 정책은 byte 기준으로 동작하며, 원거리 프리뷰는 남겨두더라도 현재 ±1 페이지 preview는 보존 우선
-- 우선순위 큐:
-  1. 현재 visible preview
-  2. active page detail
-  3. 나머지 visible page detail
-  4. visible 기준 ±1 preview
-  5. 그 외 preview prefetch
+- 캐시는 프리뷰 64 MiB와 상세 타일 128 MiB를 사용합니다. 사전 로딩은 화면에 보이는 프리뷰와 더 가까운 프리뷰를 보호합니다.
+- 화면 프리뷰는 즉시 검토합니다. 상세 타일은 화면이 200ms 안정된 후, 양방향 프리캐시는 이동이 500ms 멈춘 후 시작합니다.
+- 스케줄러는 최신 viewport, 방향별 탐색 위치와 진행 중인 요청만 유지합니다. 상세 타일의 범위는 현재 viewport와 겹치는 영역입니다.
 
 ## 3) Viewer Layer (`viewer/`)
 
 - 스크롤 가능한 단일 영역(`region`) 내에 하나의 페이지 컨테이너와 하나의 WebGPU 캔버스를 둡니다.
-- 뷰어는 PDF 파싱 구현을 알지 않고 `PdfRasterProvider`만 호출합니다.
+- 파싱과 래스터화는 `PdfRasterProvider`가 담당합니다. 기본 PDFium 워커 풀은 뷰어에 빈 슬롯을 직접 제공합니다.
 - 레이아웃은 공급자와 분리됩니다.
   - `single`: 페이지를 한 장씩 세로 연속 배치
   - `spread`: 2페이지 row를 구성하고 첫 페이지를 왼쪽/오른쪽 슬롯 중 하나에 배치
@@ -66,9 +61,8 @@
   - `data-render-state`
 - 렌더 상태 변경은 shell에서 관리하고, 실제 픽셀은 캔버스 합성으로 표시
 - 스크롤/줌/페이지 점프는 raster IO를 기다리지 않습니다. viewport는 manifest 기반 page shell을 즉시 이동시키고, background loader가 완료한 이미지만 cache에서 canvas로 합성합니다.
-- background loader는 pending task 우선순위를 계속 갱신하지만 진행 중 IO를 UI thread의 인터랙션 완료 조건으로 삼지 않습니다.
-- 대규모 문서에서도 scheduler는 전체 페이지 preview를 큐에 넣지 않습니다. 현재 active/visible/근접 page만 후보로 만들어 스크롤당 작업량을 viewport 크기에 비례시킵니다.
-- in-memory PDFium은 Web Worker 풀에서 래스터화합니다(워커를 못 만들면 main thread fallback). viewer는 고속 입력 중 새 raster 시작을 멈추고, 입력이 잠잠해진 뒤 엔진 `queueDepth`만큼 병렬로 진행합니다.
+- 로컬 앱의 PDFium 워커 4개는 전진 프리뷰, 후진 프리뷰, 상세 A, 상세 B를 맡습니다. 뷰어 스케줄러는 워커마다 응답을 받은 뒤 다음 요청을 발행합니다.
+- 프리캐시는 캐시 슬롯과 메모리에 여유가 있는 동안 각 방향으로 한 장씩 확장합니다. 메인 스레드 및 원격 공급자는 앞뒤 두 장으로 제한합니다.
 - `viewer/interaction.ts`는 순수 상태 reducer입니다. `scroll`은 native scroll을
   유지하고 `single`/`double`은 threshold wheel과 PageUp/PageDown을 bounded
   navigation effect로 변환합니다. 컨트롤러가 viewport의 `wheel`과 `keydown`을 이

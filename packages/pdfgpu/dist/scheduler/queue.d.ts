@@ -1,35 +1,31 @@
-import type { LayoutMetrics } from '../layout/layout.js';
-export interface QueueRenderTask {
+import type { PositionedPage } from '../layout/layout.js';
+export declare const PREVIEW_DPI = 96;
+type PreviewTask = {
+    kind: 'preview';
     key: string;
-    kind: 'preview' | 'detail';
+    pageIndex: number;
+    dpi: number;
+};
+export type DetailTask = {
+    kind: 'detail';
+    key: string;
     pageIndex: number;
     dpi: number;
     tileX: number;
     tileY: number;
     tileWidth: number;
     tileHeight: number;
-    priority: number;
-}
-type BuildRenderQueueOptions = {
-    layout: LayoutMetrics;
-    pageCount: number;
-    visiblePages: number[];
-    activePage: number | undefined;
-    viewportTop: number;
-    viewportHeight: number;
-    qualityDpi: number;
-    sourceScale?: number;
 };
-/**
- * Native/layout ratio for detail tile coordinates.
- *
- * Layout page dimensions already include `baseScale` (the zoom), while the
- * engine rasters a page at `widthPts * dpi / 72` px, i.e. `BASE_PREVIEW_DPI`
- * layout px at zoom 1 scaled by `dpi / BASE_PREVIEW_DPI`. Tile coordinates
- * live in that native space, so the layout extent must be converted with this
- * ratio. It is the exact inverse of the composite factor the viewer uses to
- * place a finished tile back on the canvas (`baseScale * PREVIEW_DPI / dpi`).
- */
+export type RasterTask = PreviewTask | DetailTask;
+export interface ViewportBounds {
+    top: number;
+    width: number;
+    height: number;
+}
+export declare function previewTask(pageIndex: number): PreviewTask;
+/** PDFium raster pixels per page layout pixel at the current zoom. */
 export declare function detailSourceScale(dpi: number, baseScale: number): number;
-export declare function buildRenderQueue(options: BuildRenderQueueOptions): QueueRenderTask[];
+export declare function detailTileVisible(tile: Pick<DetailTask, 'tileX' | 'tileY' | 'tileWidth' | 'tileHeight'>, page: PositionedPage, viewport: ViewportBounds, sourceScale: number): boolean;
+/** Describes the intersecting tiles of one page, from the visible centre out. */
+export declare function visibleDetailTiles(page: PositionedPage, viewport: ViewportBounds, dpi: number, sourceScale: number, rasterWidth: number, rasterHeight: number): DetailTask[];
 export {};

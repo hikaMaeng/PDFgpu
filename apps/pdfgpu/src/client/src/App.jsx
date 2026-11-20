@@ -50,7 +50,11 @@ export default function App() {
           ? createWebApiPdfRasterProvider('/api/pdfgpu')
           : providerMode === 'websocket'
             ? createWebSocketPdfRasterProvider(`${window.location.protocol === 'https:' ? 'wss' : 'ws'}://${window.location.host}/ws/pdfgpu`)
-            : await createPdfDocumentEngine();
+            : await createPdfDocumentEngine({ poolSize: 4 });
+      if (disposed) {
+        await provider.dispose();
+        return;
+      }
       const controller = await createPdfGpuViewer({
         container: viewerRef.current,
         provider,
@@ -88,10 +92,14 @@ export default function App() {
   }, [providerMode]);
 
   useEffect(() => {
-    withController((controller) => {
-      controller.setDetailDpi(detailDpi);
-    }).catch((error) => console.error('[client] setDetailDpi failed', error));
-  }, [detailDpi]);
+    let active = true;
+    initRef.current.then(() => {
+      if (active) controllerRef.current?.setDetailDpi(detailDpi);
+    }).catch((error) => {
+      if (active) console.error('[client] setDetailDpi failed', error);
+    });
+    return () => { active = false; };
+  }, [detailDpi, providerMode]);
 
   const withController = async (handler) => {
     await initRef.current;

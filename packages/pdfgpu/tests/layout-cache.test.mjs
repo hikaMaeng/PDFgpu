@@ -2,7 +2,6 @@ import assert from 'node:assert/strict';
 import { describe, it } from 'node:test';
 import { buildLayout, resolveViewportWindow, visiblePageIndices, windowPageIndices } from '../dist/layout/layout.js';
 import { RasterCache } from '../dist/scheduler/byteBudgetCache.js';
-import { buildRenderQueue, detailSourceScale } from '../dist/scheduler/queue.js';
 import { normalizeDetailDpi } from '../dist/engine/dpi.js';
 
 function createBitmap() {
@@ -211,29 +210,6 @@ describe('texture cache', () => {
     assert.equal(cache.has('detail/0/192/0/1024'), true);
   });
 
-  it('sorts render queue by priority', () => {
-    const layout = {
-      pagePositions: [
-        { index: 0, top: 0, height: 800, width: 600 },
-        { index: 1, top: 840, height: 800, width: 620 },
-        { index: 2, top: 1680, height: 800, width: 610 }
-      ],
-      totalHeight: 2500
-    };
-    const queue = buildRenderQueue({
-      layout,
-      pageCount: 3,
-      visiblePages: [0, 1],
-      activePage: 1,
-      viewportTop: 0,
-      viewportHeight: 700,
-      qualityDpi: 144
-    });
-    assert.equal(queue.length > 0, true);
-    assert.equal(queue[0].kind, 'preview');
-    assert.equal(queue[0].pageIndex, 1);
-  });
-
   it('normalizes detail dpi', () => {
     assert.equal(normalizeDetailDpi(33), 144);
     assert.equal(normalizeDetailDpi(155), 144);
@@ -241,118 +217,14 @@ describe('texture cache', () => {
     assert.equal(normalizeDetailDpi(399), 384);
   });
 
-  it('keeps visible-active order for mixed queue requests', () => {
-    const layout = {
-      pagePositions: [
-        { index: 0, top: 0, height: 800, width: 600 },
-        { index: 1, top: 840, height: 800, width: 620 },
-        { index: 2, top: 1680, height: 800, width: 610 }
-      ],
-      totalHeight: 2500
-    };
-    const queue = buildRenderQueue({
-      layout,
-      pageCount: 3,
-      visiblePages: [0, 1],
-      activePage: 1,
-      viewportTop: 300,
-      viewportHeight: 700,
-      qualityDpi: 192
-    });
-    assert.equal(queue[0].kind, 'preview');
-    assert.equal(queue[0].pageIndex, 1);
-    const firstActiveDetailIndex = queue.findIndex((item) => item.kind === 'detail' && item.pageIndex === 1);
-    const firstVisibleDetailIndex = queue.findIndex((item) => item.kind === 'detail' && item.pageIndex === 0);
-    assert.equal(firstActiveDetailIndex > -1, true);
-    assert.equal(firstVisibleDetailIndex > -1, true);
-    assert.equal(firstActiveDetailIndex < firstVisibleDetailIndex, true);
-    const previewPages = queue.filter((item) => item.kind === 'preview').map((item) => item.pageIndex);
-    assert.deepEqual(previewPages, [1, 0, 2]);
+  it('checks cache admission without evicting nearer or pinned rasters', () => {
+    const cache = new RasterCache({ maxBytes: 800 });
+    cache.set(makeBitmapEntry('p0', 10, 10, createBitmap()));
+    cache.set(makeBitmapEntry('p4', 10, 10, createBitmap()));
+    assert.equal(cache.canFit(400, new Set(['p0'])), true);
+    assert.equal(cache.canFit(401, new Set(['p0'])), false);
+    assert.equal(cache.canFit(400, new Set(['p0', 'p4'])), false);
+    assert.equal(cache.usedBytes, 800);
   });
 
-  it('covers the full zoomed page with detail tiles', () => {
-    const layout = {
-      pagePositions: [
-        { index: 0, top: 0, height: 1267, width: 979 }
-      ],
-      totalHeight: 1267
-    };
-    const queue = buildRenderQueue({
-      layout,
-      pageCount: 1,
-      visiblePages: [0],
-      activePage: 0,
-      viewportTop: 0,
-      viewportHeight: 700,
-      qualityDpi: 192,
-      // 1267x979 is a 1.2x zoomed 1056x816 preview page. The provider raster
-      // is still 2x the unzoomed preview dimensions (1632x2112), so the
-      // native/layout ratio is (192 / 96) / 1.2, not 2: the layout extent
-      // already carries the zoom.
-      sourceScale: detailSourceScale(192, 1.2)
-    });
-    const detail = queue.filter((item) => item.kind === 'detail');
-    assert.equal(detail.some((item) => item.tileY >= 1536), true);
-    assert.equal(detail.some((item) => item.tileX >= 1024), true);
-    // 1632x2112 raster: no tile may start past its right or bottom edge.
-    assert.equal(detail.every((item) => item.tileX < 1632 && item.tileY < 2112), true);
-  });
-
-  it('orders distant visible neighbors after detail workload', () => {
-    const layout = {
-      pagePositions: [
-        { index: 0, top: 0, height: 700, width: 600 },
-        { index: 1, top: 740, height: 700, width: 620 },
-        { index: 2, top: 1480, height: 700, width: 610 },
-        { index: 3, top: 2220, height: 700, width: 620 }
-      ],
-      totalHeight: 2950
-    };
-    const queue = buildRenderQueue({
-      layout,
-      pageCount: 4,
-      visiblePages: [1, 2],
-      activePage: 1,
-      viewportTop: 740,
-      viewportHeight: 700,
-      qualityDpi: 144
-    });
-
-    const firstNeighbor = queue.find((item) => item.kind === 'preview' && item.pageIndex === 2);
-    const distant = queue.find((item) => item.kind === 'preview' && item.pageIndex === 3);
-    const visibleOther = queue.find((item) => item.kind === 'preview' && item.pageIndex === 1);
-    assert.equal(firstNeighbor !== undefined, true);
-    assert.equal(distant !== undefined, true);
-    assert.equal(visibleOther === undefined, false);
-    const firstNeighborIndex = queue.findIndex((item) => item.kind === 'preview' && item.pageIndex === 0);
-    const distantIndex = queue.findIndex((item) => item.kind === 'preview' && item.pageIndex === 3);
-    assert.equal(firstNeighborIndex < distantIndex, true);
-  });
-
-  it('does not enqueue distant previews for large documents', () => {
-    const pagePositions = Array.from({ length: 504 }, (_, index) => ({
-      index,
-      top: index * 816,
-      height: 800,
-      width: 600
-    }));
-    const queue = buildRenderQueue({
-      layout: {
-        pagePositions,
-        totalHeight: 504 * 816
-      },
-      pageCount: 504,
-      visiblePages: [100, 101],
-      activePage: 100,
-      viewportTop: 100 * 816,
-      viewportHeight: 700,
-      qualityDpi: 144
-    });
-
-    const previewPages = new Set(queue.filter((item) => item.kind === 'preview').map((item) => item.pageIndex));
-    assert.equal(previewPages.has(0), false);
-    assert.equal(previewPages.has(503), false);
-    assert.deepEqual([...previewPages].sort((a, b) => a - b), [98, 99, 100, 101, 102]);
-    assert.equal(queue.length < 40, true);
-  });
 });

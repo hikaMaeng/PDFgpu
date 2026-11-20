@@ -69,6 +69,18 @@ export class RasterCache {
     return this.bytesUsed;
   }
 
+  canFit(bytes: number, keepKeys: ReadonlySet<string>): boolean {
+    if (bytes > this.maxBytes) return false;
+    let available = this.maxBytes - this.bytesUsed;
+    if (available >= bytes) return true;
+    for (const entry of this.entriesMap.values()) {
+      if (keepKeys.has(entry.key)) continue;
+      available += entry.bytes;
+      if (available >= bytes) return true;
+    }
+    return false;
+  }
+
   has(key: string): boolean {
     return this.entriesMap.has(key);
   }
@@ -143,12 +155,8 @@ export class RasterCache {
    * no-op, and above budget it evicts least-recently-used unprotected entries
    * until the cache fits again (or only protected entries remain).
    *
-   * That is deliberate. The viewer's keep set covers only visible pages and
-   * the active page +-1, so a strict prune would drop rasters two pages away
-   * and re-render them on scroll-back. Measured in Chrome (WebGPU, zoomed,
-   * DPI 384): scrolling back three screens uploaded 0 new textures because
-   * the rasters were still cached. GPU textures follow the same lifetime via
-   * `onRelease`, so GPU memory is bounded by this same budget.
+   * Callers can retain offscreen rasters for a return visit while the budget
+   * has room. `onRelease` ties each GPU texture's lifetime to its raster.
    */
   prune(keepKeys: Set<string>) {
     this.evict(keepKeys);

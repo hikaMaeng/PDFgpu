@@ -1,7 +1,7 @@
 import assert from 'node:assert/strict';
 import { describe, it } from 'node:test';
 import { buildLayout } from '../dist/layout/layout.js';
-import { buildRenderQueue, detailSourceScale } from '../dist/scheduler/queue.js';
+import { visibleDetailTiles, detailSourceScale } from '../dist/scheduler/queue.js';
 
 // External criteria, read from files this change does not touch:
 //
@@ -30,7 +30,6 @@ const POINTS_PER_INCH = 72;
 const PAGE_WIDTH_PTS = 612;
 const PAGE_HEIGHT_PTS = 792;
 const DETAIL_DPI = 192;
-const VIEWPORT_HEIGHT = 900;
 
 function roundInt(value) {
   return Math.max(1, Math.round(value));
@@ -53,18 +52,11 @@ function layoutForZoom(zoom) {
 }
 
 function detailTilesForZoom(zoom) {
-  const layout = layoutForZoom(zoom);
-  const tasks = buildRenderQueue({
-    layout,
-    pageCount: 1,
-    visiblePages: [0],
-    activePage: 0,
-    viewportTop: 0,
-    viewportHeight: VIEWPORT_HEIGHT,
-    qualityDpi: DETAIL_DPI,
-    sourceScale: detailSourceScale(DETAIL_DPI, zoom)
-  });
-  return { page: layout.pagePositions[0], tiles: tasks.filter((task) => task.kind === 'detail') };
+  const page = layoutForZoom(zoom).pagePositions[0];
+  const viewport = { top: 0, width: page.width, height: page.height };
+  const native = nativeRasterSize(DETAIL_DPI);
+  const tiles = visibleDetailTiles(page, viewport, DETAIL_DPI, detailSourceScale(DETAIL_DPI, zoom), native.width, native.height);
+  return { page, tiles };
 }
 
 function uniqueSorted(values) {
@@ -94,7 +86,7 @@ for (const zoom of [0.5, 1, 2]) {
   describe(`detail tile grid at zoom ${zoom}`, () => {
     const { page, tiles } = detailTilesForZoom(zoom);
     const native = nativeRasterSize(DETAIL_DPI);
-    const step = tiles[0]?.tileWidth ?? 0;
+    const step = 512;
     // Criterion 2, inverted: native -> layout.
     const compositeScale = zoom * PREVIEW_DPI / DETAIL_DPI;
 
@@ -108,7 +100,6 @@ for (const zoom of [0.5, 1, 2]) {
     });
 
     it('tiles the raster contiguously on both axes', () => {
-      assert.equal(step, tiles[0].tileHeight, 'tiles are not square');
       assertCoversAxis(uniqueSorted(tiles.map((tile) => tile.tileX)), step, native.width, 'columns');
       assertCoversAxis(uniqueSorted(tiles.map((tile) => tile.tileY)), step, native.height, 'rows');
     });
@@ -128,3 +119,11 @@ for (const zoom of [0.5, 1, 2]) {
     });
   });
 }
+
+it('requests only the cropped viewport, including the second page in a partly visible spread', () => {
+  const viewport = { top: 520, width: 850, height: 300 };
+  const page = { index: 1, left: 800, top: 0, width: 816, height: 1056 };
+  const tiles = visibleDetailTiles(page, viewport, 192, 2, 1632, 2112);
+  assert.deepEqual(tiles.map(({ tileX, tileY }) => [tileX, tileY]), [[0, 1024], [0, 1536]]);
+  assert.deepEqual(visibleDetailTiles({ ...page, left: 850 }, viewport, 192, 2, 1632, 2112), []);
+});

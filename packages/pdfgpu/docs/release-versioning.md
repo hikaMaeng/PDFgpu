@@ -10,6 +10,7 @@ Every PDFGPU release has an exact runtime dependency contract:
 | `@pdfgpu/core@0.1.10` | `@embedpdf/pdfium@2.15.1` | `2.15.1` | [`v0.1.10.json`](../../../release-contracts/pdfgpu/v0.1.10.json) |
 | `@pdfgpu/core@0.1.11` | `@embedpdf/pdfium@2.15.1` | `2.15.1` | [`v0.1.11.json`](../../../release-contracts/pdfgpu/v0.1.11.json) |
 | `@pdfgpu/core@0.1.12` | `@embedpdf/pdfium@2.15.1` | `2.15.1` | [`v0.1.12.json`](../../../release-contracts/pdfgpu/v0.1.12.json) |
+| `@pdfgpu/core@0.1.13` | `@embedpdf/pdfium@2.15.1` | `2.15.1` | [`v0.1.13.json`](../../../release-contracts/pdfgpu/v0.1.13.json) |
 
 The contract covers more than `package.json`:
 

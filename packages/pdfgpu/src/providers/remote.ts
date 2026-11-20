@@ -62,19 +62,23 @@ class WebApiPdfRasterProvider implements PdfRasterProvider {
   readonly queueDepth = 3;
   readonly endpoint: string;
   private documentId: string | null = null;
+  private openGeneration = 0;
 
   constructor(endpoint: string) {
     this.endpoint = endpoint.replace(/\/+$/, '');
   }
 
   async open(source: PdfDocumentSource): Promise<PdfDocumentManifest> {
+    const generation = ++this.openGeneration;
     const bytes = await sourceToBase64(source);
+    if (generation !== this.openGeneration) throw new DOMException('open aborted', 'AbortError');
     const response = await fetch(`${this.endpoint}/documents`, {
       method: 'POST',
       headers: JSON_HEADERS,
       body: JSON.stringify({ bytes })
     });
     const body = await readJson<RemoteOpenResponse>(response);
+    if (generation !== this.openGeneration) throw new DOMException('open aborted', 'AbortError');
     this.documentId = body.documentId;
     return { ...body.manifest, documentId: body.documentId };
   }
@@ -109,6 +113,7 @@ class WebApiPdfRasterProvider implements PdfRasterProvider {
   }
 
   dispose(): void {
+    this.openGeneration += 1;
     this.documentId = null;
   }
 
@@ -130,6 +135,7 @@ class WebSocketPdfRasterProvider implements PdfRasterProvider {
   private documentId: string | null = null;
   private socketPromise: Promise<WebSocket> | null = null;
   private sequence = 0;
+  private openGeneration = 0;
   private pending = new Map<string, { resolve: (value: unknown) => void; reject: (reason: unknown) => void }>();
 
   constructor(endpoint: string) {
@@ -137,8 +143,11 @@ class WebSocketPdfRasterProvider implements PdfRasterProvider {
   }
 
   async open(source: PdfDocumentSource): Promise<PdfDocumentManifest> {
+    const generation = ++this.openGeneration;
     const bytes = await sourceToBase64(source);
+    if (generation !== this.openGeneration) throw new DOMException('open aborted', 'AbortError');
     const response = await this.rpc<RemoteOpenResponse>({ method: 'open', payload: { bytes } });
+    if (generation !== this.openGeneration) throw new DOMException('open aborted', 'AbortError');
     this.documentId = response.documentId;
     return { ...response.manifest, documentId: response.documentId };
   }
@@ -172,6 +181,7 @@ class WebSocketPdfRasterProvider implements PdfRasterProvider {
   }
 
   dispose(): void {
+    this.openGeneration += 1;
     this.documentId = null;
     if (this.socketPromise) {
       this.socketPromise.then((socket) => socket.close()).catch(() => {});

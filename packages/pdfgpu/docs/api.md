@@ -77,7 +77,7 @@
   - `spreadPairing`: 양쪽 보기 행 구성 `'alone' | 'paired'`
   - `fitMode`: 현재 맞춤 정책
   - `scrollMode`: 현재 스크롤 정책
-  - `queueDepth`: 실제 동시 래스터 요청 수. in-memory 공급자는 워커 풀 크기(메인 스레드 fallback은 1), 원격 공급자는 3(내장 Web API/WebSocket 공급자가 `queueDepth = 3`을 선언)
+  - `queueDepth`: 뷰어의 래스터 요청 슬롯 수. 로컬 PDFium은 문서에 배정 가능한 워커를 최대 4개까지 사용합니다. 메인 스레드 폴백은 1, 내장 Web API/WebSocket은 3입니다.
   - `renderQuality`: `'idle' | 'preview' | 'detail'`
   - `detailDpi`: 현재 detail tile 래스터 요청 DPI
   - `colorAdjustments`: 컨트롤러가 제공하는 확정 설정값 `{ invert, brightness }`

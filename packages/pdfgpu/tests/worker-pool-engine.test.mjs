@@ -2,6 +2,7 @@ import assert from 'node:assert/strict';
 import { describe, it } from 'node:test';
 import { WorkerPoolPdfEngine } from '../dist/engine/workerPoolEngine.js';
 import { createPdfDocumentEngine } from '../dist/engine/pdfiumEngine.js';
+import { previewTask } from '../dist/scheduler/queue.js';
 
 // External criteria (HTML Web Workers + structured clone semantics), not the
 // pool's own code:
@@ -14,7 +15,7 @@ import { createPdfDocumentEngine } from '../dist/engine/pdfiumEngine.js';
 
 const MANIFEST = { pageCount: 3, pages: [0, 1, 2].map((index) => ({ index, widthPts: 612, heightPts: 792, rotation: 0 })) };
 
-function createFakeWorkers({ renderMs = 20, openDelayMs = [] } = {}) {
+function createFakeWorkers({ renderMs = 20, openDelayMs = [], failInit = [], failOpen = [] } = {}) {
   const shared = { running: 0, maxRunning: 0, closed: 0, workers: [] };
   const factory = () => {
     const listeners = { message: [], error: [] };
@@ -44,12 +45,21 @@ function createFakeWorkers({ renderMs = 20, openDelayMs = [] } = {}) {
           }
           worker.started.add(message.id);
           if (message.type === 'init' || message.type === 'close') {
+            if (message.type === 'init' && failInit.includes(worker.index)) {
+              worker.emit('message', { id: message.id, ok: false, error: 'initialization failed' });
+              return;
+            }
             worker.emit('message', { id: message.id, ok: true });
             return;
           }
           if (message.type === 'open') {
             const delay = openDelayMs[worker.index] ?? 0;
             if (delay) await new Promise((resolve) => setTimeout(resolve, delay));
+            if (failOpen.includes(worker.index)) {
+              worker.emit('message', { id: message.id, ok: false, error: 'open failed' });
+              return;
+            }
+            worker.documentByte = new Uint8Array(message.bytes)[0];
             worker.emit('message', { id: message.id, ok: true, manifest: message.manifest ?? MANIFEST });
             return;
           }
@@ -58,7 +68,7 @@ function createFakeWorkers({ renderMs = 20, openDelayMs = [] } = {}) {
           await new Promise((resolve) => setTimeout(resolve, renderMs));
           shared.running -= 1;
           if (worker.terminated) return;
-          const source = { worker: worker.index, close() { shared.closed += 1; } };
+          const source = { worker: worker.index, documentByte: worker.documentByte, close() { shared.closed += 1; } };
           worker.emit('message', {
             id: message.id,
             ok: true,
@@ -90,6 +100,52 @@ describe('pdfium worker pool', () => {
     assert.equal(engine.queueDepth, 4);
     assert.equal(shared.workers.length, 4);
     assert.ok(shared.workers.every((w) => w.received[0].type === 'init'));
+  });
+
+  it('keeps live workers after a partial init and remaps roles when the first open fails', async () => {
+    const { engine, shared } = await openPool(4, { failInit: [3], failOpen: [0] });
+    assert.equal(shared.workers[3].terminated, true);
+    assert.deepEqual(engine.getViewerSlots().map(({ id, role }) => [id, role]), [[1, 'forward'], [2, 'detail']]);
+    const preview = await engine.tryRenderForViewer(1, previewTask(0));
+    assert.equal(preview.source.worker, 1);
+    await engine.dispose();
+  });
+
+  it('keeps a slot occupied until an aborted external render actually answers', async () => {
+    const { engine, shared } = await openPool(4, { renderMs: 30 });
+    await new Promise(setImmediate);
+    const controller = new AbortController();
+    const capture = engine.renderPreview({ pageIndex: 0, dpi: 192, signal: controller.signal });
+    const rejected = assert.rejects(capture, { name: 'AbortError' });
+    await new Promise(setImmediate);
+    controller.abort();
+    await rejected;
+    assert.equal(engine.getViewerSlots()[0].available, false);
+    assert.equal(engine.tryRenderForViewer(0, previewTask(0)), undefined);
+    await new Promise((resolve) => {
+      const unsubscribe = engine.subscribeViewerSlots(() => {
+        if (!engine.getViewerSlots()[0].available) return;
+        unsubscribe();
+        resolve();
+      });
+    });
+    assert.equal(shared.closed, 1);
+    assert.equal((await engine.tryRenderForViewer(0, previewTask(0))).source.worker, 0);
+    await engine.dispose();
+  });
+
+  it('does not close a newer PDF after an older open is superseded', async () => {
+    const { factory, shared } = createFakeWorkers({ openDelayMs: [15] });
+    const engine = await WorkerPoolPdfEngine.create({ createWorker: factory, size: 4, loadBytes });
+    const older = engine.open(Uint8Array.of(1));
+    const rejected = assert.rejects(older, { name: 'AbortError' });
+    await new Promise(setImmediate);
+    await engine.open(Uint8Array.of(2));
+    await rejected;
+    const preview = await engine.tryRenderForViewer(0, previewTask(0));
+    assert.equal(preview.source.documentByte, 2);
+    assert.equal(shared.workers.flatMap(({ received }) => received).some(({ type }) => type === 'close'), false);
+    await engine.dispose();
   });
 
   it('gives every worker its own copy of the bytes, and the manifest of the first', async () => {

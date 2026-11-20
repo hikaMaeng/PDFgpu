@@ -1,9 +1,11 @@
 import { buildLayout, resolveViewportWindow, spreadRows, visiblePageIndices, windowPageIndices } from '../layout/layout.js';
 import { findPageAtViewportPoint, projectOverlaysForVisiblePages, screenRectToAbsoluteRect } from './coordinates.js';
-import { RasterCache, cacheKey } from '../scheduler/byteBudgetCache.js';
+import { RasterCache } from '../scheduler/byteBudgetCache.js';
 import { DEFAULT_COLOR_ADJUSTMENTS, updateColorAdjustments } from '../render/colorAdjustments.js';
 import { PageRenderer } from '../render/renderer.js';
-import { buildRenderQueue, detailSourceScale } from '../scheduler/queue.js';
+import { detailSourceScale, detailTileVisible, previewTask, PREVIEW_DPI, visibleDetailTiles } from '../scheduler/queue.js';
+import { ProgressiveRasterScheduler } from '../scheduler/progressive.js';
+import { WorkerPoolPdfEngine } from '../engine/workerPoolEngine.js';
 import { captureSourceRect } from './capture.js';
 import { PdfGpuCaptureError } from '../types.js';
 import { normalizeDetailDpi } from '../engine/dpi.js';
@@ -14,13 +16,13 @@ const DEFAULT_PAGE_GAP = 16;
 const DEFAULT_SPREAD_GAP = 20;
 const DEFAULT_OVERSCAN_PAGES = 2;
 const DEFAULT_ZOOM_STEP = 1.1;
-const BASE_PREVIEW_DPI = 96;
 const DEFAULT_DETAIL_DPI = 192;
 const LOAD_PARSE_PROGRESS = 35;
 const LOAD_PARSE_TRANSITION_MS = 900;
 const LOAD_READY_TRANSITION_MS = 1400;
-const MAX_PENDING_QUEUE_TASKS = 96;
-const INTERACTION_IDLE_MS = 140;
+const PREVIEW_CACHE_BYTES = 64 * 1024 * 1024;
+const DETAIL_CACHE_BYTES = 128 * 1024 * 1024;
+const FALLBACK_PREFETCH_RADIUS = 2;
 const VIEWPORT_REGION_ROLE = 'region';
 const VIEWPORT_REGION_LABEL = 'PDF viewer';
 const PAGE_TEXT_LAYER_TESTID = 'pdfgpu-text-layer';
@@ -35,12 +37,9 @@ export async function createPdfGpuViewer(options) {
 class PdfGpuViewerControllerImpl {
     constructor(options) {
         this.listeners = new Set();
-        this.loadSignals = new Set();
-        this.inFlightTasks = new Map();
         this.pageShells = new Map();
         this.layout = { pagePositions: [], totalHeight: 0, totalWidth: 0 };
-        this.queueDepth = 1;
-        this.queueRefreshToken = 0;
+        this.loadGeneration = 0;
         this.disposed = false;
         this.manifest = null;
         this.baseScale = 1;
@@ -58,12 +57,8 @@ class PdfGpuViewerControllerImpl {
          *   change, set by `scrollToPage` and by `renderCycle`; bound: one number.
          */
         this.pageModeAnchorScrollTop = null;
-        this.initialPreviewPages = new Set();
+        this.loadPreviewPages = new Set();
         this.pendingLayout = false;
-        this.queuePumpScheduled = false;
-        this.pendingQueueTasks = new Map();
-        this.interactionUntil = 0;
-        this.queueIdleTimerId = null;
         this.minZoom = DEFAULT_MIN_ZOOM;
         this.maxZoom = DEFAULT_MAX_ZOOM;
         this.overscanPages = DEFAULT_OVERSCAN_PAGES;
@@ -78,8 +73,8 @@ class PdfGpuViewerControllerImpl {
             const window = resolveViewportWindow(this.layout.pagePositions, this.viewport.clientHeight || 1, this.viewport.scrollTop, this.overscanPages);
             this.windowPages = windowPageIndices(this.layout.pagePositions, window);
             this.visiblePages = visiblePageIndices(this.layout.pagePositions, window, this.viewport.scrollTop, this.viewport.clientHeight || 1);
-            if (this.state.loadPhase === 'rendering' && this.initialPreviewPages.size === 0) {
-                this.initialPreviewPages = new Set(this.visiblePages);
+            if (this.state.loadPhase === 'rendering' && !this.loadReadyAnimationRunning) {
+                this.loadPreviewPages = new Set(this.visiblePages);
                 this.updateLoadProgress();
             }
             // Page modes navigate by page, but the scrollbar can still move the view.
@@ -115,18 +110,26 @@ class PdfGpuViewerControllerImpl {
                     page: normalizedActive + 1,
                 }).state;
             }
-            this.state.renderQuality = this.currentBucketDpi > BASE_PREVIEW_DPI ? 'detail' : 'preview';
             this.applyVisibleShells();
-            this.requestQueue(this.visiblePages);
             this.applyCompositedFrame(this.visiblePages);
+            const activePage = normalizedActive ?? this.visiblePages[0];
+            if (activePage !== undefined) {
+                const bounds = this.viewportBounds();
+                const pages = [...this.visiblePages].sort((a, b) => Math.abs(a - activePage) - Math.abs(b - activePage));
+                this.previewCache.prune(this.previewKeepKeys());
+                this.scheduler.update({
+                    activePage,
+                    visiblePages: pages,
+                    pageCount: this.manifest.pageCount,
+                    detailTiles: () => this.detailTiles(pages, bounds),
+                });
+            }
             this.notify();
         };
         this.onScroll = () => {
-            this.markActiveInteraction();
-            this.scheduleUpdate();
+            this.scheduleUpdate(true);
         };
         this.onWheel = (event) => {
-            this.markActiveInteraction();
             const transition = reduceViewerInteraction(this.interaction, {
                 type: 'wheel',
                 deltaY: event.deltaY,
@@ -223,20 +226,42 @@ class PdfGpuViewerControllerImpl {
         this.renderer = new PageRenderer();
         // GPU texture lifetime follows raster lifetime: whenever a raster leaves
         // the cache, the texture uploaded from it is destroyed in the same step.
-        this.cache = new RasterCache({
-            onRelease: (source) => this.renderer.releaseTexture(source)
+        const onRelease = (source) => this.renderer.releaseTexture(source);
+        this.previewCache = new RasterCache({ maxBytes: PREVIEW_CACHE_BYTES, onRelease });
+        this.detailCache = new RasterCache({ maxBytes: DETAIL_CACHE_BYTES, onRelease });
+        const pool = this.engine instanceof WorkerPoolPdfEngine ? this.engine : undefined;
+        const limit = this.engine.kind === 'in-memory' ? 8 : 3;
+        const sharedSlots = Array.from({ length: clamp(1, limit, this.engine.queueDepth ?? 1) }, (_, id) => ({
+            id, role: 'shared', available: true,
+        }));
+        const slots = () => pool?.getViewerSlots() ?? sharedSlots;
+        this.scheduler = new ProgressiveRasterScheduler({
+            slots,
+            render: (slot, task, signal) => pool ? pool.tryRenderForViewer(slot, task) : this.renderRaster(task, signal),
+            has: (task) => (task.kind === 'preview' ? this.previewCache : this.detailCache).has(task.key),
+            canPrefetch: (pageIndex, anchor, bytes) => this.canPrefetch(pageIndex, anchor, bytes),
+            cache: (task, raster, anchor) => this.storeRaster(task, raster, anchor),
+            changed: (pageIndex) => this.onRasterChanged(pageIndex),
+            failed: (error) => console.error('[pdfgpu] render failed', error),
+            prefetchRadius: pool ? Infinity : FALLBACK_PREFETCH_RADIUS,
+            abortStale: this.engine.kind === 'webapi' || this.engine.kind === 'websocket',
         });
-        // In-memory engines report their real parallelism: 1 for the main-thread
-        // fallback, the worker count for the PDFium worker pool. Remote providers
-        // are capped at 3 concurrent requests.
-        const maxQueueDepth = this.engine.kind === 'in-memory' ? Math.min(8, this.engine.queueDepth ?? 1) : 3;
-        this.queueDepth = clamp(1, maxQueueDepth, this.engine.queueDepth ?? 1);
-        this.state.queueDepth = this.queueDepth;
+        this.state.queueDepth = slots().length;
         this.snapshot = { ...this.state, visiblePages: [] };
         this.interaction = createViewerInteractionState({
             pageCount: 0,
             mode: viewerModeFromParts(this.state.scrollMode, this.state.viewMode),
             pairing: this.state.spreadPairing,
+        });
+        this.unsubscribeSlots = pool?.subscribeViewerSlots(() => {
+            if (this.disposed)
+                return;
+            const depth = slots().length;
+            if (this.state.queueDepth !== depth) {
+                this.state.queueDepth = depth;
+                this.notify();
+            }
+            this.scheduler.pump();
         });
     }
     async initialize() {
@@ -288,9 +313,7 @@ class PdfGpuViewerControllerImpl {
         this.state.fitMode = 'none';
         this.baseScale = next;
         this.currentBucketDpi = this.detailDpi;
-        this.state.renderQuality = this.currentBucketDpi > BASE_PREVIEW_DPI ? 'detail' : 'preview';
         this.rebuildLayout();
-        this.pendingQueueTasks.clear();
         this.applyVisibleShells();
         this.scheduleUpdate();
         this.notify();
@@ -357,6 +380,7 @@ class PdfGpuViewerControllerImpl {
             return;
         this.state.scrollMode = mode;
         this.syncInteractionMode();
+        this.scheduleUpdate();
         this.notify();
     }
     setDetailDpi(dpi) {
@@ -367,8 +391,6 @@ class PdfGpuViewerControllerImpl {
         this.detailDpi = next;
         this.currentBucketDpi = next;
         this.state.detailDpi = next;
-        this.state.renderQuality = 'detail';
-        this.pendingQueueTasks.clear();
         this.scheduleUpdate();
         this.notify();
     }
@@ -409,7 +431,7 @@ class PdfGpuViewerControllerImpl {
         this.viewport.scrollTop = Math.max(0, position.top + position.height / 2 - (this.viewport.clientHeight || 1) / 2);
         // Read back: the browser clamps at the end of the document.
         this.pageModeAnchorScrollTop = this.viewport.scrollTop;
-        this.scheduleUpdate();
+        this.scheduleUpdate(true);
         this.notify();
     }
     async captureRegion(start, end, options = {}) {
@@ -481,11 +503,9 @@ class PdfGpuViewerControllerImpl {
             this.loadProgressRafId = null;
         }
         this.loadReadyAnimationRunning = false;
-        if (this.queueIdleTimerId !== null) {
-            window.clearTimeout(this.queueIdleTimerId);
-            this.queueIdleTimerId = null;
-        }
-        this.cancelQueue();
+        this.loadGeneration += 1;
+        this.scheduler.reset();
+        this.unsubscribeSlots?.();
         this.listeners.clear();
         this.viewport.removeEventListener('scroll', this.onScroll);
         this.viewport.removeEventListener('wheel', this.onWheel);
@@ -493,7 +513,8 @@ class PdfGpuViewerControllerImpl {
         window.removeEventListener('resize', this.onResize);
         this.renderer.dispose();
         this.engine.dispose();
-        this.cache.clear();
+        this.previewCache.clear();
+        this.detailCache.clear();
         this.clearShells();
         this.manifest = null;
         this.state = {
@@ -508,7 +529,7 @@ class PdfGpuViewerControllerImpl {
             spreadPairing: this.state.spreadPairing,
             fitMode: this.state.fitMode,
             scrollMode: this.state.scrollMode,
-            queueDepth: this.queueDepth,
+            queueDepth: 0,
             renderQuality: 'idle',
             detailDpi: this.detailDpi,
             colorAdjustments: this.state.colorAdjustments,
@@ -523,55 +544,57 @@ class PdfGpuViewerControllerImpl {
             activePage: undefined
         };
         this.snapshot = { ...this.state, visiblePages: [] };
-        this.viewport.replaceChildren();
+        this.canvas.remove();
+        this.content.remove();
     }
     async loadInternal(source) {
         this.assertAlive();
-        this.cancelQueue();
+        const token = ++this.loadGeneration;
+        this.scheduler.reset();
         if (this.loadProgressRafId !== null) {
             cancelAnimationFrame(this.loadProgressRafId);
             this.loadProgressRafId = null;
         }
-        this.cache.clear();
+        this.loadReadyAnimationRunning = false;
+        this.previewCache.clear();
+        this.detailCache.clear();
         this.clearShells();
+        this.manifest = null;
         this.state.loading = true;
         this.state.loadPhase = 'opening';
         this.state.loadProgress = 0;
         this.state.loadProgressDeterminate = false;
         this.state.loadedPages = 0;
         this.state.loadPageCount = 0;
-        this.initialPreviewPages.clear();
+        this.loadPreviewPages.clear();
         this.pageModeAnchorScrollTop = null;
         this.state.error = null;
         this.state.renderQuality = 'preview';
         this.visiblePages = [];
         this.state.visiblePages = [];
         this.notify();
-        const openSignal = new AbortController();
-        this.loadSignals.add(openSignal);
-        const token = ++this.queueRefreshToken;
         try {
             const manifest = await this.engine.open(source, (progress) => {
+                if (this.disposed || token !== this.loadGeneration)
+                    return;
                 this.state.loadProgressDeterminate = progress.ratio !== undefined;
                 if (progress.ratio !== undefined) {
                     this.state.loadProgress = Math.min(34, Math.round(progress.ratio * 34));
                 }
                 this.notify();
             });
-            if (openSignal.signal.aborted || token !== this.queueRefreshToken || this.disposed) {
-                throw new DOMException('load aborted', 'AbortError');
-            }
+            if (this.disposed || token !== this.loadGeneration)
+                return;
             this.manifest = manifest;
             this.interaction = reduceViewerInteraction(this.interaction, {
                 type: 'setPageCount',
                 pageCount: manifest.pageCount,
             }).state;
             this.pageSizes = manifest.pages.map((page) => ({
-                width: Math.max(1, Math.round(page.widthPts * BASE_PREVIEW_DPI / 72)),
-                height: Math.max(1, Math.round(page.heightPts * BASE_PREVIEW_DPI / 72))
+                width: Math.max(1, Math.round(page.widthPts * PREVIEW_DPI / 72)),
+                height: Math.max(1, Math.round(page.heightPts * PREVIEW_DPI / 72))
             }));
             this.currentBucketDpi = this.detailDpi;
-            this.state.renderQuality = this.currentBucketDpi > BASE_PREVIEW_DPI ? 'detail' : 'preview';
             this.state.pageCount = manifest.pageCount;
             this.state.loadPageCount = manifest.pageCount;
             this.state.loadPhase = 'rendering';
@@ -582,10 +605,11 @@ class PdfGpuViewerControllerImpl {
             this.state.activePage = this.activePageIndex !== undefined ? this.activePageIndex + 1 : undefined;
             this.state.loading = false;
             this.notify();
-            this.cancelQueue();
             this.scheduleUpdate();
         }
         catch (error) {
+            if (this.disposed || token !== this.loadGeneration)
+                return;
             if (error instanceof DOMException && error.name === 'AbortError') {
                 this.state.loading = false;
                 this.state.loadPhase = 'idle';
@@ -594,187 +618,103 @@ class PdfGpuViewerControllerImpl {
                 this.notify();
                 return;
             }
-            if (this.disposed || token !== this.queueRefreshToken)
-                return;
             this.state.loading = false;
             this.state.loadPhase = 'error';
             this.state.error = error instanceof Error ? error.name + ': ' + error.message : 'failed to open document';
             this.notify();
             throw error;
         }
-        finally {
-            this.loadSignals.delete(openSignal);
-        }
     }
-    requestQueue(visiblePages) {
-        if (!this.manifest)
-            return;
-        const window = resolveViewportWindow(this.layout.pagePositions, this.viewport.clientHeight || 1, this.viewport.scrollTop, this.overscanPages);
-        const tasks = buildRenderQueue({
-            layout: this.layout,
-            pageCount: this.pageSizes.length,
-            visiblePages,
-            activePage: this.activePageIndex,
-            viewportTop: this.viewport.scrollTop,
-            viewportHeight: this.viewport.clientHeight,
-            qualityDpi: this.currentBucketDpi,
-            // `page.width`/`page.height` are layout dimensions and already include
-            // `baseScale` (the zoom). Detail tile coordinates must be in the
-            // provider's native raster space, whose page width is
-            // `widthPts * dpi / 72`. `sourceScale` is therefore the native/layout
-            // ratio: (dpi / BASE_PREVIEW_DPI) / baseScale. This is the exact inverse
-            // of the composite factor used in `applyCompositedFrame`
-            // (`baseScale * BASE_PREVIEW_DPI / entry.dpi`); dropping `baseScale`
-            // here makes the tile grid overshoot the raster at zoom > 1 (tiles the
-            // engine clamps or rejects) and stop short of the page at zoom < 1.
-            sourceScale: detailSourceScale(this.currentBucketDpi, this.baseScale)
+    viewportBounds() {
+        return { top: this.viewport.scrollTop, width: this.viewport.clientWidth || 1, height: this.viewport.clientHeight || 1 };
+    }
+    detailTiles(visiblePages, bounds) {
+        const dpi = this.currentBucketDpi;
+        const scale = detailSourceScale(dpi, this.baseScale);
+        return visiblePages.flatMap((index) => {
+            const page = this.layout.pagePositions[index];
+            const source = this.manifest?.pages[index];
+            if (!page || !source)
+                return [];
+            const width = Math.max(1, Math.round(source.widthPts * dpi / 72));
+            const height = Math.max(1, Math.round(source.heightPts * dpi / 72));
+            return visibleDetailTiles(page, bounds, dpi, scale, width, height);
         });
-        const tasksToRun = this.toRenderTaskList(tasks);
-        const desiredKeys = new Set(tasksToRun.map((task) => task.key));
-        this.cancelStaleQueueWork(desiredKeys);
-        const keepKeys = this.collectKeepKeys(visiblePages);
-        this.cache.prune(keepKeys);
-        for (const task of tasksToRun) {
-            if (this.cache.has(task.key) || this.inFlightTasks.has(task.key))
+    }
+    async renderRaster(task, signal) {
+        const generation = this.loadGeneration;
+        if (this.engine.kind === 'in-memory') {
+            // The single-thread fallback yields before entering synchronous PDFium.
+            await new Promise((resolve) => setTimeout(resolve, 0));
+        }
+        if (generation !== this.loadGeneration)
+            throw new DOMException('render aborted', 'AbortError');
+        const { pageIndex, dpi } = task;
+        if (task.kind === 'preview')
+            return this.engine.renderPreview({ pageIndex, dpi, signal });
+        const { tileX, tileY, tileWidth, tileHeight } = task;
+        return this.engine.renderTile({ pageIndex, dpi, tileX, tileY, tileWidth, tileHeight, signal });
+    }
+    previewKeepKeys(pageIndex, anchor) {
+        const keep = new Set(this.visiblePages.map((page) => previewTask(page).key));
+        if (pageIndex === undefined || anchor === undefined)
+            return keep;
+        const distance = Math.abs(pageIndex - anchor);
+        for (const entry of this.previewCache.values()) {
+            if (Math.abs(entry.pageIndex - anchor) <= distance)
+                keep.add(entry.key);
+        }
+        return keep;
+    }
+    canPrefetch(pageIndex, anchor, bytes) {
+        const page = this.pageSizes[pageIndex];
+        return !!page && this.previewCache.canFit(bytes ?? page.width * page.height * 4, this.previewKeepKeys(pageIndex, anchor));
+    }
+    detailKeepKeys(bounds) {
+        const keep = new Set();
+        const scale = detailSourceScale(this.currentBucketDpi, this.baseScale);
+        for (const entry of this.detailCache.values()) {
+            if (entry.dpi !== this.currentBucketDpi || !this.visiblePages.includes(entry.pageIndex))
                 continue;
-            const existing = this.pendingQueueTasks.get(task.key);
-            if (!existing || task.priority < existing.priority) {
-                this.pendingQueueTasks.set(task.key, task);
-            }
+            const page = this.layout.pagePositions[entry.pageIndex];
+            if (page && detailTileVisible(entry, page, bounds, scale))
+                keep.add(entry.key);
         }
-        this.trimPendingQueue();
-        this.pumpBackgroundQueue();
+        return keep;
     }
-    pumpBackgroundQueue() {
-        if (this.disposed || this.queuePumpScheduled)
-            return;
-        const idleDelay = this.interactionUntil - performance.now();
-        if (idleDelay > 0) {
-            if (this.queueIdleTimerId !== null) {
-                window.clearTimeout(this.queueIdleTimerId);
-            }
-            this.queueIdleTimerId = window.setTimeout(() => {
-                this.queueIdleTimerId = null;
-                this.pumpBackgroundQueue();
-            }, Math.ceil(idleDelay));
-            return;
-        }
-        this.queuePumpScheduled = true;
-        window.setTimeout(() => {
-            this.queuePumpScheduled = false;
-            if (this.disposed)
-                return;
-            const parallelLimit = Math.max(1, this.queueDepth);
-            while (this.inFlightTasks.size < parallelLimit) {
-                const task = this.takeNextPendingTask();
-                if (!task)
-                    return;
-                void this.startRenderTask(task, this.queueRefreshToken).finally(() => {
-                    this.pumpBackgroundQueue();
-                });
-            }
-        }, 0);
+    storeRaster(task, raster, prefetchAnchor) {
+        const isPreview = task.kind === 'preview';
+        if (!isPreview && raster.dpi !== task.dpi)
+            return false;
+        const cache = isPreview ? this.previewCache : this.detailCache;
+        const keep = isPreview ? this.previewKeepKeys(task.pageIndex, prefetchAnchor) : this.detailKeepKeys(this.viewportBounds());
+        if ((!isPreview || prefetchAnchor !== undefined) && !cache.canFit(raster.width * raster.height * 4, keep))
+            return false;
+        keep.add(task.key);
+        cache.set({
+            key: task.key,
+            kind: task.kind,
+            pageIndex: task.pageIndex,
+            dpi: raster.dpi,
+            tileX: isPreview ? 0 : raster.tileX ?? task.tileX,
+            tileY: isPreview ? 0 : raster.tileY ?? task.tileY,
+            tileWidth: isPreview ? 0 : raster.tileWidth ?? raster.width,
+            tileHeight: isPreview ? 0 : raster.tileHeight ?? raster.height,
+            source: raster.source,
+            width: raster.width,
+            height: raster.height,
+            sourceWidth: raster.width,
+            sourceHeight: raster.height,
+            dpiRounded: normalizeDetailDpi(raster.dpi),
+        }, keep);
+        return true;
     }
-    takeNextPendingTask() {
-        let selected;
-        for (const task of this.pendingQueueTasks.values()) {
-            if (!selected || task.priority < selected.priority) {
-                selected = task;
-            }
-        }
-        if (selected) {
-            this.pendingQueueTasks.delete(selected.key);
-        }
-        return selected;
-    }
-    trimPendingQueue() {
-        if (this.pendingQueueTasks.size <= MAX_PENDING_QUEUE_TASKS)
-            return;
-        const keep = [...this.pendingQueueTasks.values()]
-            .sort((a, b) => a.priority - b.priority)
-            .slice(0, MAX_PENDING_QUEUE_TASKS);
-        this.pendingQueueTasks.clear();
-        for (const task of keep) {
-            this.pendingQueueTasks.set(task.key, task);
-        }
-    }
-    startRenderTask(task, token) {
-        if (this.disposed || token !== this.queueRefreshToken)
-            return Promise.resolve();
-        const key = task.key;
-        if (this.cache.has(key) || this.inFlightTasks.has(key))
-            return Promise.resolve();
-        const controller = new AbortController();
-        this.inFlightTasks.set(key, controller);
-        const complete = async () => {
-            try {
-                await this.deferRasterStart();
-                if (token !== this.queueRefreshToken || this.disposed)
-                    return;
-                if (performance.now() < this.interactionUntil) {
-                    this.pendingQueueTasks.set(task.key, task);
-                    return;
-                }
-                const result = task.kind === 'preview'
-                    ? await this.engine.renderPreview({
-                        pageIndex: task.pageIndex,
-                        signal: controller.signal
-                    })
-                    : await this.engine.renderTile({
-                        pageIndex: task.pageIndex,
-                        dpi: task.dpi,
-                        tileX: task.tileX,
-                        tileY: task.tileY,
-                        tileWidth: task.tileWidth,
-                        tileHeight: task.tileHeight,
-                        signal: controller.signal
-                    });
-                if (controller.signal.aborted || token !== this.queueRefreshToken || this.disposed) {
-                    if (result.source instanceof ImageBitmap) {
-                        result.source.close();
-                    }
-                    return;
-                }
-                const protectedKeys = this.collectKeepKeys(this.visiblePages);
-                protectedKeys.add(key);
-                this.cache.set({
-                    kind: task.kind,
-                    pageIndex: task.pageIndex,
-                    dpi: result.dpi,
-                    tileX: result.tileX ?? 0,
-                    tileY: result.tileY ?? 0,
-                    tileWidth: result.tileWidth ?? 0,
-                    tileHeight: result.tileHeight ?? 0,
-                    source: result.source,
-                    width: result.width,
-                    height: result.height,
-                    sourceWidth: result.width,
-                    sourceHeight: result.height,
-                    dpiRounded: normalizeDetailDpi(result.dpi),
-                    key
-                }, protectedKeys);
-                if (this.visiblePages.includes(task.pageIndex)) {
-                    this.applyCompositedFrame(this.visiblePages);
-                }
-            }
-            catch (error) {
-                if (error instanceof DOMException && error.name === 'AbortError')
-                    return;
-                console.error('[pdfgpu] render failed', error);
-            }
-            finally {
-                this.inFlightTasks.delete(key);
-                this.applyShellState(task.pageIndex);
-                this.updateLoadProgress();
-                this.notify();
-            }
-        };
-        return complete();
-    }
-    deferRasterStart() {
-        return new Promise((resolve) => {
-            window.setTimeout(resolve, 0);
-        });
+    onRasterChanged(pageIndex) {
+        this.applyShellState(pageIndex);
+        if (!this.pendingLayout && this.visiblePages.includes(pageIndex))
+            this.applyCompositedFrame(this.visiblePages);
+        this.updateLoadProgress();
+        this.notify();
     }
     applyVisibleShells() {
         if (!this.manifest)
@@ -817,6 +757,7 @@ class PdfGpuViewerControllerImpl {
         const width = Math.max(1, Math.ceil(this.viewport.clientWidth || 1));
         const height = Math.max(1, Math.ceil(this.viewport.clientHeight || 1));
         const viewportTop = Math.max(0, this.viewport.scrollTop || 0);
+        const bounds = { top: viewportTop, width, height };
         // Resize only when the viewport changed. Measured in Chrome before this
         // guard: 550 assignments over 275 frames, every one with the value the
         // canvas already had (0 real resizes, 0 context reconfigures). Clearing
@@ -841,12 +782,14 @@ class PdfGpuViewerControllerImpl {
         const tiles = [];
         const visibleSet = new Set(visiblePages);
         const detailByPage = new Map();
-        for (const entry of this.cache.values()) {
+        const sourceScale = detailSourceScale(this.currentBucketDpi, this.baseScale);
+        for (const entry of this.detailCache.values()) {
             if (!visibleSet.has(entry.pageIndex))
                 continue;
-            if (entry.kind !== 'detail')
-                continue;
             if (entry.dpi !== this.currentBucketDpi)
+                continue;
+            const page = this.layout.pagePositions[entry.pageIndex];
+            if (!page || !detailTileVisible(entry, page, bounds, sourceScale))
                 continue;
             const pageEntries = detailByPage.get(entry.pageIndex);
             if (pageEntries)
@@ -859,13 +802,7 @@ class PdfGpuViewerControllerImpl {
             if (!page)
                 continue;
             const pageLeft = page.left;
-            const preview = this.cache.get(cacheKey({
-                kind: 'preview',
-                pageIndex,
-                dpiBucket: BASE_PREVIEW_DPI,
-                tileX: 0,
-                tileY: 0
-            }));
+            const preview = this.previewCache.get(previewTask(pageIndex).key);
             if (preview) {
                 tiles.push({
                     source: preview.source,
@@ -875,8 +812,9 @@ class PdfGpuViewerControllerImpl {
                     height: Math.round(page.height)
                 });
             }
-            for (const entry of detailByPage.get(pageIndex) ?? []) {
-                const scale = this.baseScale * BASE_PREVIEW_DPI / entry.dpi;
+            const detail = detailByPage.get(pageIndex);
+            for (const entry of detail ?? []) {
+                const scale = 1 / sourceScale;
                 tiles.push({
                     source: entry.source,
                     left: Math.round(pageLeft + entry.tileX * scale),
@@ -885,10 +823,9 @@ class PdfGpuViewerControllerImpl {
                     height: Math.max(1, Math.round(entry.height * scale))
                 });
             }
-            this.updateShellStateByContent(pageIndex, preview ? 'preview' : 'idle');
+            this.updateShellStateByContent(pageIndex, detail?.length ? 'detail' : preview ? 'preview' : 'idle');
         }
-        const visibleHasDetail = visiblePages.some((pageIndex) => this.pageHasDetail(pageIndex));
-        if (visibleHasDetail) {
+        if (detailByPage.size > 0) {
             this.state.renderQuality = 'detail';
         }
         else if (visiblePages.length) {
@@ -902,71 +839,25 @@ class PdfGpuViewerControllerImpl {
         });
         this.state.backend = this.renderer.state;
     }
-    collectKeepKeys(visiblePages) {
-        const keep = new Set();
-        const keepPages = new Set(visiblePages);
-        if (this.activePageIndex !== undefined) {
-            keepPages.add(this.activePageIndex);
-            if (this.activePageIndex > 0)
-                keepPages.add(this.activePageIndex - 1);
-            if (this.activePageIndex + 1 < (this.manifest?.pageCount ?? 0))
-                keepPages.add(this.activePageIndex + 1);
-        }
-        for (const pageIndex of keepPages) {
-            keep.add(cacheKey({
-                kind: 'preview',
-                pageIndex,
-                dpiBucket: BASE_PREVIEW_DPI,
-                tileX: 0,
-                tileY: 0
-            }));
-        }
-        for (const entry of this.cache.values()) {
-            if (!entry.key)
-                continue;
-            if (keepPages.has(entry.pageIndex) && entry.kind === 'detail') {
-                keep.add(entry.key);
-            }
-        }
-        return keep;
-    }
-    cancelStaleQueueWork(desiredKeys) {
-        for (const key of this.pendingQueueTasks.keys()) {
-            if (!desiredKeys.has(key)) {
-                this.pendingQueueTasks.delete(key);
-            }
-        }
-        for (const [key, signal] of this.inFlightTasks) {
-            if (!desiredKeys.has(key)) {
-                signal.abort();
-            }
-        }
-    }
-    toRenderTaskList(tasks) {
-        const deduped = new Map();
-        for (const task of tasks) {
-            deduped.set(task.key, task);
-        }
-        return [...deduped.values()];
-    }
     pageHasPreview(pageIndex) {
-        const key = cacheKey({
-            kind: 'preview',
-            pageIndex,
-            dpiBucket: BASE_PREVIEW_DPI,
-            tileX: 0,
-            tileY: 0
-        });
-        return this.cache.has(key);
+        return this.previewCache.has(previewTask(pageIndex).key);
     }
     updateLoadProgress() {
-        if (this.state.loadPhase !== 'rendering' || this.initialPreviewPages.size === 0)
+        if (this.state.loadPhase !== 'rendering' || this.loadPreviewPages.size === 0)
             return;
-        const loadedPages = [...this.initialPreviewPages].filter((pageIndex) => this.pageHasPreview(pageIndex)).length;
+        let loadedPages = 0;
+        let failedPages = 0;
+        for (const pageIndex of this.loadPreviewPages) {
+            if (this.pageHasPreview(pageIndex))
+                loadedPages += 1;
+            else if (this.scheduler.previewFailed(pageIndex))
+                failedPages += 1;
+        }
         this.state.loadedPages = loadedPages;
+        const settledPages = loadedPages + failedPages;
         if (this.state.loadProgress < LOAD_PARSE_PROGRESS)
             return;
-        if (loadedPages >= this.initialPreviewPages.size) {
+        if (settledPages >= this.loadPreviewPages.size) {
             if (!this.loadReadyAnimationRunning) {
                 this.loadReadyAnimationRunning = true;
                 this.animateLoadProgressTo(100, LOAD_READY_TRANSITION_MS, () => {
@@ -980,7 +871,7 @@ class PdfGpuViewerControllerImpl {
             }
             return;
         }
-        this.state.loadProgress = Math.min(99, LOAD_PARSE_PROGRESS + Math.round((loadedPages / this.initialPreviewPages.size) * (100 - LOAD_PARSE_PROGRESS)));
+        this.state.loadProgress = Math.min(99, LOAD_PARSE_PROGRESS + Math.round((settledPages / this.loadPreviewPages.size) * (100 - LOAD_PARSE_PROGRESS)));
     }
     animateLoadProgressTo(target, duration = LOAD_PARSE_TRANSITION_MS, onComplete) {
         if (this.loadProgressRafId !== null) {
@@ -1018,8 +909,7 @@ class PdfGpuViewerControllerImpl {
         this.loadProgressRafId = requestAnimationFrame(tick);
     }
     pageHasDetail(pageIndex) {
-        const details = this.cache.values().filter((entry) => entry.pageIndex === pageIndex);
-        return details.some((entry) => entry.kind === 'detail' && entry.dpi === this.currentBucketDpi);
+        return this.detailCache.values().some((entry) => entry.pageIndex === pageIndex && entry.dpi === this.currentBucketDpi);
     }
     updateShellStateByContent(pageIndex, state) {
         const shell = this.pageShells.get(pageIndex);
@@ -1113,7 +1003,6 @@ class PdfGpuViewerControllerImpl {
         this.state.fitMode = fitMode;
         this.baseScale = next;
         this.currentBucketDpi = this.detailDpi;
-        this.state.renderQuality = this.currentBucketDpi > BASE_PREVIEW_DPI ? 'detail' : 'preview';
         this.rebuildAndRefresh();
     }
     reapplyFitOrLayout() {
@@ -1125,7 +1014,6 @@ class PdfGpuViewerControllerImpl {
     }
     rebuildAndRefresh() {
         this.rebuildLayout();
-        this.pendingQueueTasks.clear();
         this.applyVisibleShells();
         this.scheduleUpdate();
         this.notify();
@@ -1209,7 +1097,8 @@ class PdfGpuViewerControllerImpl {
         }
         return best;
     }
-    scheduleUpdate() {
+    scheduleUpdate(moved = false) {
+        this.scheduler.invalidate(moved);
         this.pendingLayout = true;
         this.scheduleFrame();
     }
@@ -1228,18 +1117,6 @@ class PdfGpuViewerControllerImpl {
             }
         });
     }
-    cancelQueue() {
-        this.queueRefreshToken += 1;
-        this.pendingQueueTasks.clear();
-        for (const signal of this.loadSignals) {
-            signal.abort();
-        }
-        this.loadSignals.clear();
-        for (const controller of this.inFlightTasks.values()) {
-            controller.abort();
-        }
-        this.inFlightTasks.clear();
-    }
     notify() {
         const next = {
             ...this.state,
@@ -1252,9 +1129,6 @@ class PdfGpuViewerControllerImpl {
             return;
         this.snapshot = next;
         this.listeners.forEach((listener) => listener(this.snapshot));
-    }
-    markActiveInteraction() {
-        this.interactionUntil = performance.now() + INTERACTION_IDLE_MS;
     }
     bindEvents() {
         this.viewport.addEventListener('scroll', this.onScroll);

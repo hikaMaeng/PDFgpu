@@ -9,6 +9,8 @@ import type {
 } from '../types.js';
 import { normalizeDetailDpi } from './dpi.js';
 import type { WorkerRequest, WorkerRequestBody, WorkerResponse } from './workerProtocol.js';
+import type { RasterTask } from '../scheduler/queue.js';
+import type { ViewerRasterSlot } from '../scheduler/progressive.js';
 
 const TILE_SIZE = 512;
 
@@ -25,6 +27,7 @@ type Pending = {
   reject: (error: Error) => void;
   /** True once the caller gave up (abort); a late raster is closed, not delivered. */
   abandoned: boolean;
+  detachAbort?: () => void;
 };
 
 type Slot = {
@@ -46,6 +49,7 @@ type Slot = {
    * so a worker still opening in the background is never asked to render.
    */
   docGeneration: number;
+  failedGeneration: number;
 };
 
 function abortError() {
@@ -75,29 +79,40 @@ export interface WorkerPoolOptions {
  */
 export class WorkerPoolPdfEngine implements PdfDocumentEngine {
   readonly kind = 'in-memory' as const;
-  private readonly slots: Slot[];
+  private readonly slots: Slot[] = [];
+  private readonly slotListeners = new Set<() => void>();
   private manifest: PdfDocumentManifest | null = null;
   private generation = 0;
   private disposed = false;
 
-  private constructor(private readonly options: WorkerPoolOptions) {
-    this.slots = Array.from({ length: Math.max(1, options.size) }, () => this.createSlot());
-  }
+  private constructor(private readonly options: WorkerPoolOptions) {}
 
-  /** Starts `size` workers and waits until each has loaded PDFium. */
+  /** Starts up to `size` workers. A partially initialized pool can still render. */
   static async create(options: WorkerPoolOptions): Promise<WorkerPoolPdfEngine> {
     const engine = new WorkerPoolPdfEngine(options);
-    try {
-      await Promise.all(engine.slots.map((slot) => engine.send(slot, { type: 'init' })));
-    } catch (error) {
-      engine.terminateAll();
-      throw error;
+    let initializationError: unknown;
+    for (let index = 0; index < Math.max(1, options.size); index += 1) {
+      try {
+        engine.slots.push(engine.createSlot());
+      } catch (error) {
+        initializationError = error;
+      }
     }
+    await Promise.all(engine.slots.map(async (slot) => {
+      try {
+        await engine.send(slot, { type: 'init' });
+      } catch (error) {
+        initializationError = error;
+        slot.dead = true;
+        slot.worker.terminate();
+      }
+    }));
+    if (engine.liveWorkers === 0) throw initializationError ?? new Error('no pdfium worker started');
     return engine;
   }
 
   get queueDepth() {
-    return this.slots.length;
+    return this.liveWorkers;
   }
 
   /** Workers that have not crashed. */
@@ -106,44 +121,77 @@ export class WorkerPoolPdfEngine implements PdfDocumentEngine {
   }
 
   async open(source: PdfDocumentSource, onProgress?: PdfLoadProgressListener): Promise<PdfDocumentManifest> {
-    this.generation += 1;
-    const token = this.generation;
+    if (this.disposed) throw new Error('engine is disposed');
+    const token = ++this.generation;
+    this.manifest = null;
     const bytes = await this.options.loadBytes(source, onProgress);
+    if (token !== this.generation) throw abortError();
+
     const live = this.liveSlots();
-    const [first, ...rest] = live;
-    for (const slot of live) slot.docGeneration = 0;
-    // The first worker extracts the manifest; the rest reuse it instead of
-    // walking every page again. Each worker gets its own copy of the bytes
-    // (transferred, so the copy is not duplicated again in flight).
-    const firstCopy = bytes.slice().buffer;
-    const opened = await this.send(first, { type: 'open', bytes: firstCopy }, [firstCopy]);
-    const manifest = opened.manifest;
-    if (!manifest) throw new Error('worker returned no manifest');
-    if (token !== this.generation) {
-      await this.closeDocuments();
-      throw new DOMException('open aborted', 'AbortError');
+    let manifest: PdfDocumentManifest | undefined;
+    let openError: unknown;
+    for (const slot of live) {
+      try {
+        manifest = (await this.openSlot(slot, bytes)).manifest;
+        if (!manifest) throw new Error('worker returned no manifest');
+      } catch (error) {
+        if (token !== this.generation) throw abortError();
+        slot.failedGeneration = token;
+        openError = error;
+        continue;
+      }
+      if (token !== this.generation) throw abortError();
+      slot.docGeneration = token;
+      break;
     }
-    first.docGeneration = token;
+    if (!manifest) throw openError ?? new Error('no pdfium worker opened the document');
     this.manifest = manifest;
-    // Return as soon as one worker can render; the others open in the
-    // background and join the pool when ready, so the first preview never
-    // waits for the slowest worker. (In the Chrome measurement all four
-    // workers opened a 1.8MB file within 2ms of each other, so the gain there
-    // was small; it matters when one worker is slow or a file is large.)
-    for (const slot of rest) {
-      const copy = bytes.slice().buffer;
-      this.send(slot, { type: 'open', bytes: copy, manifest }, [copy]).then(
+    this.notifySlots();
+    // One worker inspects the PDF; the others reuse its manifest and join
+    // as soon as their document is open.
+    for (const slot of live) {
+      if (slot.dead || slot.docGeneration === token || slot.failedGeneration === token) continue;
+      void this.openSlot(slot, bytes, manifest).then(
         () => {
-          if (token === this.generation) slot.docGeneration = token;
+          if (token !== this.generation) return;
+          slot.docGeneration = token;
+          this.notifySlots();
         },
         (error) => {
-          if (token === this.generation && !this.disposed) {
-            console.warn('[pdfgpu] pdfium worker failed to open the document', error);
-          }
+          if (token !== this.generation) return;
+          slot.failedGeneration = token;
+          console.warn('[pdfgpu] pdfium worker failed to open the document', error);
+          this.notifySlots();
         }
       );
     }
     return manifest;
+  }
+
+  getViewerSlots(): ViewerRasterSlot[] {
+    const eligible = this.slots.filter((slot) => !slot.dead && slot.failedGeneration !== this.generation).slice(0, 4);
+    const roles: ViewerRasterSlot['role'][] = eligible.length === 1 ? ['shared']
+      : eligible.length === 2 ? ['forward', 'detail'] : ['forward', 'backward', 'detail', 'detail'];
+    return eligible.map((slot, index) => ({
+      id: this.slots.indexOf(slot),
+      role: roles[index],
+      available: this.slotAvailable(slot),
+    }));
+  }
+
+  subscribeViewerSlots(listener: () => void): () => void {
+    this.slotListeners.add(listener);
+    return () => { this.slotListeners.delete(listener); };
+  }
+
+  tryRenderForViewer(id: number, task: RasterTask): Promise<PdfRasterResult> | undefined {
+    const slot = this.slots[id];
+    if (!slot || !this.slotAvailable(slot)) return;
+    this.assertPage(task.pageIndex);
+    const { pageIndex, dpi } = task;
+    if (task.kind === 'preview') return this.renderOn(slot, { type: 'preview', pageIndex, dpi });
+    const { tileX, tileY, tileWidth, tileHeight } = task;
+    return this.renderOn(slot, this.tileRequest({ pageIndex, dpi, tileX, tileY, tileWidth, tileHeight }));
   }
 
   async renderPreview(request: PdfPreviewRenderRequest): Promise<PdfRasterResult> {
@@ -153,15 +201,7 @@ export class WorkerPoolPdfEngine implements PdfDocumentEngine {
 
   async renderTile(request: PdfTileRenderRequest): Promise<PdfRasterResult> {
     this.assertPage(request.pageIndex);
-    return this.render({
-      type: 'tile',
-      pageIndex: request.pageIndex,
-      dpi: normalizeDetailDpi(request.dpi),
-      tileX: request.tileX,
-      tileY: request.tileY,
-      tileWidth: request.tileWidth ?? TILE_SIZE,
-      tileHeight: request.tileHeight ?? TILE_SIZE
-    }, request.signal);
+    return this.render(this.tileRequest(request), request.signal);
   }
 
   async dispose(): Promise<void> {
@@ -170,6 +210,19 @@ export class WorkerPoolPdfEngine implements PdfDocumentEngine {
     this.generation += 1;
     this.manifest = null;
     this.terminateAll();
+    this.slotListeners.clear();
+  }
+
+  private tileRequest(request: PdfTileRenderRequest): Extract<WorkerRequestBody, { type: 'tile' }> {
+    return {
+      type: 'tile',
+      pageIndex: request.pageIndex,
+      dpi: normalizeDetailDpi(request.dpi),
+      tileX: request.tileX,
+      tileY: request.tileY,
+      tileWidth: request.tileWidth ?? TILE_SIZE,
+      tileHeight: request.tileHeight ?? TILE_SIZE,
+    };
   }
 
   private async render(
@@ -177,7 +230,13 @@ export class WorkerPoolPdfEngine implements PdfDocumentEngine {
     signal?: AbortSignal
   ): Promise<PdfRasterResult> {
     if (signal?.aborted) throw abortError();
-    const slot = this.pickSlot();
+    return this.renderOn(this.pickSlot(), message, signal);
+  }
+
+  private async renderOn(
+    slot: Slot, message: Extract<WorkerRequestBody, { type: 'preview' | 'tile' }>, signal?: AbortSignal
+  ): Promise<PdfRasterResult> {
+    if (signal?.aborted) throw abortError();
     const response = await this.send(slot, message, [], signal);
     if (!response.raster) throw new Error('worker returned no raster');
     return response.raster;
@@ -201,23 +260,36 @@ export class WorkerPoolPdfEngine implements PdfDocumentEngine {
           entry.abandoned = true;
           // The worker skips it if it has not started; if it has, the
           // finished raster is closed on arrival instead of delivered.
-          slot.worker.postMessage({ id: -1, type: 'cancel', target: id });
           reject(abortError());
+          if (!slot.dead) slot.worker.postMessage({ id: -1, type: 'cancel', target: id });
         };
         signal.addEventListener('abort', onAbort, { once: true });
+        entry.detachAbort = () => signal.removeEventListener('abort', onAbort);
       }
-      slot.worker.postMessage({ ...message, id } as WorkerRequest, transfer);
+      try {
+        slot.worker.postMessage({ ...message, id } as WorkerRequest, transfer);
+      } catch (error) {
+        slot.pending.delete(id);
+        entry.detachAbort?.();
+        reject(error);
+        this.notifySlots();
+      }
     });
   }
 
   private createSlot(): Slot {
     const worker = this.options.createWorker();
-    const slot: Slot = { worker, pending: new Map(), nextId: 1, dead: false, docGeneration: 0 };
+    const slot: Slot = { worker, pending: new Map(), nextId: 1, dead: false, docGeneration: 0, failedGeneration: -1 };
     worker.addEventListener('message', (event) => {
       const response = event.data;
       const entry = slot.pending.get(response.id);
-      if (!entry) return;
+      if (!entry) {
+        if (response.ok && response.raster) closeIfBitmap(response.raster.source);
+        return;
+      }
       slot.pending.delete(response.id);
+      entry.detachAbort?.();
+      this.notifySlots();
       if (entry.abandoned) {
         if (response.ok && response.raster) closeIfBitmap(response.raster.source);
         return;
@@ -237,9 +309,11 @@ export class WorkerPoolPdfEngine implements PdfDocumentEngine {
       slot.dead = true;
       const error = new Error(`pdfium worker failed: ${event.message ?? 'unknown error'}`);
       for (const entry of slot.pending.values()) {
+        entry.detachAbort?.();
         if (!entry.abandoned) entry.reject(error);
       }
       slot.pending.clear();
+      this.notifySlots();
     });
     return slot;
   }
@@ -265,19 +339,30 @@ export class WorkerPoolPdfEngine implements PdfDocumentEngine {
     return best;
   }
 
-  private async closeDocuments() {
-    await Promise.allSettled(this.liveSlots().map((slot) => this.send(slot, { type: 'close' })));
+  private openSlot(slot: Slot, bytes: Uint8Array, manifest?: PdfDocumentManifest) {
+    const copy = bytes.slice().buffer;
+    return this.send(slot, { type: 'open', bytes: copy, manifest }, [copy]);
+  }
+
+  private slotAvailable(slot: Slot): boolean {
+    return !!this.manifest && !slot.dead && slot.docGeneration === this.generation && slot.pending.size === 0;
+  }
+
+  private notifySlots() {
+    for (const listener of this.slotListeners) listener();
   }
 
   private terminateAll() {
     for (const slot of this.slots) {
       for (const entry of slot.pending.values()) {
+        entry.detachAbort?.();
         if (!entry.abandoned) entry.reject(abortError());
       }
       slot.pending.clear();
       slot.dead = true;
       slot.worker.terminate();
     }
+    this.notifySlots();
   }
 
   private assertPage(pageIndex: number) {

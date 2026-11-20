@@ -92,15 +92,21 @@ class MainThreadPdfEngine {
         this.queueDepth = 1;
         this.manifest = null;
         this.generation = 0;
+        this.disposed = false;
         this.document = new PdfiumDocument(pdfium);
     }
     async open(source, onProgress) {
-        this.generation += 1;
-        const token = this.generation;
+        if (this.disposed)
+            throw new Error('engine is disposed');
+        const token = ++this.generation;
+        this.manifest = null;
         const bytes = await sourceToBytes(source, onProgress);
+        if (token !== this.generation)
+            throw new DOMException('open aborted', 'AbortError');
         const manifest = await this.document.open(bytes);
         if (token !== this.generation) {
-            await this.document.dispose();
+            if (this.disposed)
+                await this.document.dispose();
             throw new DOMException('open aborted', 'AbortError');
         }
         this.manifest = manifest;
@@ -115,6 +121,7 @@ class MainThreadPdfEngine {
         return this.document.renderTile(normalizeTileRequest(request));
     }
     async dispose() {
+        this.disposed = true;
         this.generation += 1;
         this.manifest = null;
         await this.document.dispose();
