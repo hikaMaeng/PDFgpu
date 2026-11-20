@@ -69,6 +69,17 @@ export type PdfGpuFitMode = 'none' | 'width' | 'height' | 'page';
 export type PdfGpuScrollMode = 'continuous' | 'page';
 export type PdfGpuLoadPhase = 'idle' | 'opening' | 'rendering' | 'ready' | 'error';
 
+/** Display color settings for PDF page rasters. */
+export interface PdfGpuColorAdjustments {
+  /** Invert all three RGB channels before adjusting brightness. Defaults to false. */
+  invert?: boolean;
+  /** Amount added to each normalized RGB channel after inversion. Range: -1 through 1. Defaults to 0. */
+  brightness?: number;
+}
+
+/** Resolved, immutable display color settings. */
+export type PdfGpuColorAdjustmentState = Readonly<Required<PdfGpuColorAdjustments>>;
+
 export interface PdfLoadProgress {
   loadedBytes: number;
   totalBytes?: number;
@@ -107,6 +118,8 @@ export interface PdfGpuViewerOptions {
   pageGap?: number;
   spreadGap?: number;
   detailDpi?: number;
+  /** Initial WebGPU page color settings. */
+  colorAdjustments?: PdfGpuColorAdjustments;
 }
 
 export interface PdfGpuViewerState {
@@ -124,6 +137,8 @@ export interface PdfGpuViewerState {
   queueDepth: number;
   renderQuality: 'idle' | 'preview' | 'detail';
   detailDpi: number;
+  /** Configured page color settings. The viewer applies these when backend is 'webgpu'. */
+  colorAdjustments?: PdfGpuColorAdjustmentState;
   visiblePages: number[];
   loading: boolean;
   loadPhase: PdfGpuLoadPhase;
@@ -150,6 +165,8 @@ export interface PdfGpuViewerController extends PdfGpuCaptureController {
   setFitMode(mode: PdfGpuFitMode): void;
   setScrollMode(mode: PdfGpuScrollMode): void;
   setDetailDpi(dpi: number): void;
+  /** Updates the provided WebGPU page color settings and schedules a repaint. */
+  setColorAdjustments(update: PdfGpuColorAdjustments): void;
   fitWidth(): void;
   fitHeight(): void;
   fitPage(): void;

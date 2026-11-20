@@ -1,6 +1,7 @@
 import { buildLayout, resolveViewportWindow, spreadRows, visiblePageIndices, windowPageIndices } from '../layout/layout.js';
 import { findPageAtViewportPoint, projectOverlaysForVisiblePages, screenRectToAbsoluteRect } from './coordinates.js';
 import { RasterCache, cacheKey } from '../scheduler/byteBudgetCache.js';
+import { DEFAULT_COLOR_ADJUSTMENTS, updateColorAdjustments } from '../render/colorAdjustments.js';
 import { PageRenderer } from '../render/renderer.js';
 import { buildRenderQueue, detailSourceScale } from '../scheduler/queue.js';
 import { captureSourceRect } from './capture.js';
@@ -72,7 +73,6 @@ class PdfGpuViewerControllerImpl {
         this.loadProgressRafId = null;
         this.loadReadyAnimationRunning = false;
         this.renderCycle = () => {
-            this.rafId = null;
             if (this.disposed || this.state.loading || !this.manifest)
                 return;
             const window = resolveViewportWindow(this.layout.pagePositions, this.viewport.clientHeight || 1, this.viewport.scrollTop, this.overscanPages);
@@ -198,6 +198,7 @@ class PdfGpuViewerControllerImpl {
             queueDepth: 0,
             renderQuality: 'idle',
             detailDpi: normalizeDetailDpi(options.detailDpi ?? DEFAULT_DETAIL_DPI),
+            colorAdjustments: updateColorAdjustments(DEFAULT_COLOR_ADJUSTMENTS, options.colorAdjustments ?? {}),
             visiblePages: [],
             loading: false,
             loadPhase: 'idle',
@@ -262,14 +263,16 @@ class PdfGpuViewerControllerImpl {
         this.viewport.appendChild(this.canvas);
         this.viewport.appendChild(this.content);
         this.bindEvents();
-        this.state.backend = await this.renderer.init(this.canvas);
-        this.renderer.onDeviceRestored = () => {
+        this.renderer.onBackendChange = (backend) => {
             if (this.disposed)
                 return;
-            this.state.backend = this.renderer.state;
+            this.state.backend = backend;
+            if (backend === 'webgpu')
+                this.scheduleUpdate();
             this.notify();
-            this.scheduleUpdate();
         };
+        await this.renderer.init(this.canvas);
+        this.state.backend = this.renderer.state;
         this.state.renderQuality = 'idle';
         this.notify();
     }
@@ -367,6 +370,17 @@ class PdfGpuViewerControllerImpl {
         this.state.renderQuality = 'detail';
         this.pendingQueueTasks.clear();
         this.scheduleUpdate();
+        this.notify();
+    }
+    setColorAdjustments(update) {
+        this.assertAlive();
+        const current = this.state.colorAdjustments;
+        const next = updateColorAdjustments(current, update);
+        if (next === current)
+            return;
+        this.state.colorAdjustments = next;
+        if (this.state.backend === 'webgpu' && this.manifest && !this.state.loading)
+            this.scheduleFrame();
         this.notify();
     }
     fitWidth() {
@@ -497,6 +511,7 @@ class PdfGpuViewerControllerImpl {
             queueDepth: this.queueDepth,
             renderQuality: 'idle',
             detailDpi: this.detailDpi,
+            colorAdjustments: this.state.colorAdjustments,
             visiblePages: [],
             loading: false,
             loadPhase: 'idle',
@@ -879,12 +894,13 @@ class PdfGpuViewerControllerImpl {
         else if (visiblePages.length) {
             this.state.renderQuality = 'preview';
         }
-        this.state.backend = this.renderer.state;
         this.renderer.render(this.canvas, {
             width,
             height,
-            tiles
+            tiles,
+            colorAdjustments: this.state.colorAdjustments
         });
+        this.state.backend = this.renderer.state;
     }
     collectKeepKeys(visiblePages) {
         const keep = new Set();
@@ -1194,13 +1210,22 @@ class PdfGpuViewerControllerImpl {
         return best;
     }
     scheduleUpdate() {
-        if (this.pendingLayout)
-            return;
         this.pendingLayout = true;
+        this.scheduleFrame();
+    }
+    scheduleFrame() {
+        if (this.rafId !== null)
+            return;
         this.rafId = requestAnimationFrame(() => {
             this.rafId = null;
-            this.pendingLayout = false;
-            this.renderCycle();
+            if (this.pendingLayout) {
+                this.pendingLayout = false;
+                this.renderCycle();
+            }
+            else if (!this.disposed && !this.state.loading && this.renderer.state === 'webgpu') {
+                this.applyCompositedFrame(this.visiblePages);
+                this.notify();
+            }
         });
     }
     cancelQueue() {

@@ -1,12 +1,15 @@
 import { buildLayout, resolveViewportWindow, spreadRows, visiblePageIndices, windowPageIndices, type LayoutMetrics } from '../layout/layout.js';
 import { findPageAtViewportPoint, projectOverlaysForVisiblePages, screenRectToAbsoluteRect } from './coordinates.js';
 import { RasterCache, cacheKey } from '../scheduler/byteBudgetCache.js';
+import { DEFAULT_COLOR_ADJUSTMENTS, updateColorAdjustments } from '../render/colorAdjustments.js';
 import { PageRenderer } from '../render/renderer.js';
 import { buildRenderQueue, detailSourceScale, type QueueRenderTask } from '../scheduler/queue.js';
 import { captureSourceRect } from './capture.js';
 import {
   type PdfDocumentManifest,
   type PdfDocumentSource,
+  type PdfGpuColorAdjustmentState,
+  type PdfGpuColorAdjustments,
   type PdfGpuFitMode,
   type PdfGpuScrollMode,
   type PdfGpuSpreadPlacement,
@@ -96,7 +99,7 @@ class PdfGpuViewerControllerImpl implements PdfGpuViewerController, PdfGpuCaptur
   private layout: LayoutMetrics = { pagePositions: [], totalHeight: 0, totalWidth: 0 };
   private queueDepth = 1;
   private queueRefreshToken = 0;
-  private state: PdfGpuViewerState;
+  private state: PdfGpuViewerState & { colorAdjustments: PdfGpuColorAdjustmentState };
   private snapshot: PdfGpuViewerState;
   private disposed = false;
   private manifest: PdfDocumentManifest | null = null;
@@ -152,6 +155,7 @@ class PdfGpuViewerControllerImpl implements PdfGpuViewerController, PdfGpuCaptur
       queueDepth: 0,
       renderQuality: 'idle',
       detailDpi: normalizeDetailDpi(options.detailDpi ?? DEFAULT_DETAIL_DPI),
+      colorAdjustments: updateColorAdjustments(DEFAULT_COLOR_ADJUSTMENTS, options.colorAdjustments ?? {}),
       visiblePages: [],
       loading: false,
       loadPhase: 'idle',
@@ -225,13 +229,14 @@ class PdfGpuViewerControllerImpl implements PdfGpuViewerController, PdfGpuCaptur
     this.viewport.appendChild(this.content);
     this.bindEvents();
 
-    this.state.backend = await this.renderer.init(this.canvas);
-    this.renderer.onDeviceRestored = () => {
+    this.renderer.onBackendChange = (backend) => {
       if (this.disposed) return;
-      this.state.backend = this.renderer.state;
+      this.state.backend = backend;
+      if (backend === 'webgpu') this.scheduleUpdate();
       this.notify();
-      this.scheduleUpdate();
     };
+    await this.renderer.init(this.canvas);
+    this.state.backend = this.renderer.state;
     this.state.renderQuality = 'idle';
     this.notify();
   }
@@ -328,6 +333,16 @@ class PdfGpuViewerControllerImpl implements PdfGpuViewerController, PdfGpuCaptur
     this.state.renderQuality = 'detail';
     this.pendingQueueTasks.clear();
     this.scheduleUpdate();
+    this.notify();
+  }
+
+  setColorAdjustments(update: PdfGpuColorAdjustments): void {
+    this.assertAlive();
+    const current = this.state.colorAdjustments;
+    const next = updateColorAdjustments(current, update);
+    if (next === current) return;
+    this.state.colorAdjustments = next;
+    if (this.state.backend === 'webgpu' && this.manifest && !this.state.loading) this.scheduleFrame();
     this.notify();
   }
 
@@ -469,6 +484,7 @@ class PdfGpuViewerControllerImpl implements PdfGpuViewerController, PdfGpuCaptur
       queueDepth: this.queueDepth,
       renderQuality: 'idle',
       detailDpi: this.detailDpi,
+      colorAdjustments: this.state.colorAdjustments,
       visiblePages: [],
       loading: false,
       loadPhase: 'idle',
@@ -565,7 +581,6 @@ class PdfGpuViewerControllerImpl implements PdfGpuViewerController, PdfGpuCaptur
   }
 
   private renderCycle = () => {
-    this.rafId = null;
     if (this.disposed || this.state.loading || !this.manifest) return;
 
     const window = resolveViewportWindow(
@@ -929,12 +944,13 @@ class PdfGpuViewerControllerImpl implements PdfGpuViewerController, PdfGpuCaptur
       this.state.renderQuality = 'preview';
     }
 
-    this.state.backend = this.renderer.state;
     this.renderer.render(this.canvas, {
       width,
       height,
-      tiles
+      tiles,
+      colorAdjustments: this.state.colorAdjustments
     });
+    this.state.backend = this.renderer.state;
   }
 
   private collectKeepKeys(visiblePages: number[]): Set<string> {
@@ -1253,12 +1269,21 @@ class PdfGpuViewerControllerImpl implements PdfGpuViewerController, PdfGpuCaptur
   }
 
   private scheduleUpdate() {
-    if (this.pendingLayout) return;
     this.pendingLayout = true;
+    this.scheduleFrame();
+  }
+
+  private scheduleFrame() {
+    if (this.rafId !== null) return;
     this.rafId = requestAnimationFrame(() => {
       this.rafId = null;
-      this.pendingLayout = false;
-      this.renderCycle();
+      if (this.pendingLayout) {
+        this.pendingLayout = false;
+        this.renderCycle();
+      } else if (!this.disposed && !this.state.loading && this.renderer.state === 'webgpu') {
+        this.applyCompositedFrame(this.visiblePages);
+        this.notify();
+      }
     });
   }
 

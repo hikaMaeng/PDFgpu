@@ -1,8 +1,10 @@
+import { DEFAULT_COLOR_ADJUSTMENTS } from './colorAdjustments.js';
 const GPU_TEXTURE_USAGE_COPY_DST = 0x02;
 const GPU_TEXTURE_USAGE_TEXTURE_BINDING = 0x04;
 const GPU_TEXTURE_USAGE_RENDER_ATTACHMENT = 0x10;
 const GPU_BUFFER_USAGE_COPY_DST = 0x08;
 const GPU_BUFFER_USAGE_VERTEX = 0x20;
+const GPU_BUFFER_USAGE_UNIFORM = 0x40;
 const VERTEX_STRIDE = 4;
 function getNavigatorGpu() {
     if (typeof navigator === 'undefined')
@@ -52,6 +54,11 @@ export class PageRenderer {
         this.format = null;
         this.pipeline = null;
         this.sampler = null;
+        this.colorUniformBuffer = null;
+        this.colorBindGroup = null;
+        this.lastColorAdjustments = null;
+        // Matches the two f32 fields in the fragment shader's ColorAdjustments struct.
+        this.colorUniformData = new Float32Array(2);
         this.frameCanvas = null;
         this.frameContext = null;
         this.frameCount = 0;
@@ -64,12 +71,10 @@ export class PageRenderer {
          */
         this.canvasBoundToWebGpu = false;
         this.disposed = false;
+        this.recoveryGeneration = 0;
         this.loggedUndrawable = false;
-        /**
-         * Called after a lost GPU device has been replaced and the renderer can draw
-         * again. The viewer wires this to a repaint; nothing is drawn until then.
-         */
-        this.onDeviceRestored = null;
+        /** Reports loss and the outcome of device recovery to the viewer. */
+        this.onBackendChange = null;
         /**
          * GPU textures uploaded from raster sources.
          *
@@ -103,7 +108,7 @@ export class PageRenderer {
         this.vertexBufferBytes = 0;
     }
     async init(canvas) {
-        if (this.isInitialized)
+        if (this.disposed || this.isInitialized)
             return this._backend;
         this.targetCanvas = canvas;
         const gpu = getNavigatorGpu();
@@ -113,11 +118,17 @@ export class PageRenderer {
         }
         try {
             const adapter = await gpu.requestAdapter();
+            if (this.disposed)
+                return this._backend;
             if (!adapter) {
                 this.isInitialized = true;
                 return this._backend;
             }
             const device = await adapter.requestDevice();
+            if (this.disposed) {
+                device.destroy();
+                return this._backend;
+            }
             this.device = device;
             this.watchDeviceLoss(device);
             const format = gpu.getPreferredCanvasFormat();
@@ -138,12 +149,25 @@ export class PageRenderer {
                 minFilter: 'linear'
             });
             this.pipeline = this.createPipeline(this.device, format);
+            this.colorUniformBuffer = device.createBuffer({
+                size: this.colorUniformData.byteLength,
+                usage: GPU_BUFFER_USAGE_UNIFORM | GPU_BUFFER_USAGE_COPY_DST
+            });
+            this.colorBindGroup = device.createBindGroup({
+                layout: this.pipeline.getBindGroupLayout(1),
+                entries: [{ binding: 0, resource: { buffer: this.colorUniformBuffer } }]
+            });
             this._backend = 'webgpu';
             console.info('[pdfgpu] webgpu renderer initialized', { format: this.format });
         }
         catch (error) {
-            this._backend = 'unsupported';
+            if (this.disposed)
+                return this._backend;
+            this._backend = this.canvasBoundToWebGpu ? 'error' : 'unsupported';
             this.initError = error instanceof Error ? error.message : 'webgpu init failed';
+            this.colorUniformBuffer?.destroy();
+            this.clearColorResources();
+            this.device?.destroy();
             this.device = null;
             this.context = null;
             this.pipeline = null;
@@ -247,6 +271,7 @@ export class PageRenderer {
             this.gpuBytes = 0;
             this.vertexBuffer = null;
             this.vertexBufferBytes = 0;
+            this.clearColorResources();
             this.device = null;
             this.pipeline = null;
             this.sampler = null;
@@ -254,20 +279,26 @@ export class PageRenderer {
             this.initError = `device lost: ${info?.message ?? info?.reason ?? 'unknown'}`;
             this.isInitialized = false;
             this.loggedUndrawable = false;
+            const generation = ++this.recoveryGeneration;
             const canvas = this.targetCanvas;
-            if (!canvas)
-                return;
-            void this.init(canvas).then((backend) => {
-                if (backend === 'webgpu' && !this.disposed)
-                    this.onDeviceRestored?.();
-            });
+            if (canvas) {
+                void this.init(canvas).then(() => {
+                    if (this.disposed || generation !== this.recoveryGeneration)
+                        return;
+                    if (this._backend === 'webgpu')
+                        this.onBackendChange?.(this._backend);
+                });
+            }
+            this.onBackendChange?.(this._backend);
         });
     }
     dispose() {
         this.disposed = true;
-        this.onDeviceRestored = null;
+        this.onBackendChange = null;
         this.releaseAllTextures();
         this.releaseVertexBuffer();
+        this.colorUniformBuffer?.destroy();
+        this.clearColorResources();
         if (this.device) {
             this.device.destroy?.();
             this.device = null;
@@ -279,7 +310,7 @@ export class PageRenderer {
         this.frameContext = null;
     }
     renderWebGpu(frame) {
-        if (!this.device || !this.context || !this.pipeline || !this.sampler)
+        if (!this.device || !this.context || !this.pipeline || !this.sampler || !this.colorUniformBuffer || !this.colorBindGroup)
             return;
         // Resolve every tile's texture and pack all vertex data into one array
         // before the pass starts, so the pass itself allocates nothing.
@@ -301,6 +332,13 @@ export class PageRenderer {
             ? this.ensureVertexBuffer(vertexCursor * VERTEX_STRIDE * 4)
             : null;
         if (vertexBuffer) {
+            const colors = frame.colorAdjustments ?? DEFAULT_COLOR_ADJUSTMENTS;
+            if (colors.invert !== this.lastColorAdjustments?.invert || colors.brightness !== this.lastColorAdjustments?.brightness) {
+                this.colorUniformData[0] = colors.invert ? 1 : 0;
+                this.colorUniformData[1] = colors.brightness;
+                this.device.queue.writeBuffer(this.colorUniformBuffer, 0, this.colorUniformData);
+                this.lastColorAdjustments = colors;
+            }
             this.device.queue.writeBuffer(vertexBuffer, 0, vertices.buffer, vertices.byteOffset, vertexCursor * VERTEX_STRIDE * 4);
         }
         const encoder = this.device.createCommandEncoder();
@@ -316,6 +354,7 @@ export class PageRenderer {
         });
         pass.setPipeline(this.pipeline);
         if (vertexBuffer) {
+            pass.setBindGroup(1, this.colorBindGroup);
             pass.setVertexBuffer(0, vertexBuffer);
             for (const item of drawable) {
                 pass.setBindGroup(0, item.bindGroup);
@@ -411,6 +450,11 @@ export class PageRenderer {
         }
         this.vertexBufferBytes = 0;
     }
+    clearColorResources() {
+        this.colorUniformBuffer = null;
+        this.colorBindGroup = null;
+        this.lastColorAdjustments = null;
+    }
     render2d(canvas, frame) {
         const composed = this.getFrameCanvas(frame.width, frame.height);
         if (!composed)
@@ -467,9 +511,22 @@ export class PageRenderer {
         @group(0) @binding(0) var pageSampler: sampler;
         @group(0) @binding(1) var pageTexture: texture_2d<f32>;
 
+        struct ColorAdjustments {
+          invert: f32,
+          brightness: f32,
+        }
+
+        @group(1) @binding(0) var<uniform> colorAdjustments: ColorAdjustments;
+
+        fn adjustColor(rgb: vec3f) -> vec3f {
+          let inverted = select(rgb, vec3f(1.0) - rgb, colorAdjustments.invert != 0.0);
+          return clamp(inverted + vec3f(colorAdjustments.brightness), vec3f(0.0), vec3f(1.0));
+        }
+
         @fragment
         fn fragmentMain(in: VertexOut) -> @location(0) vec4f {
-          return textureSample(pageTexture, pageSampler, in.uv);
+          let texel = textureSample(pageTexture, pageSampler, in.uv);
+          return vec4f(adjustColor(texel.rgb), texel.a);
         }
       `
         });

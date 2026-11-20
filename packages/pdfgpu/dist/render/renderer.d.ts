@@ -1,4 +1,4 @@
-import type { PdfImageSource } from '../types.js';
+import type { PdfGpuBackend, PdfGpuColorAdjustmentState, PdfImageSource } from '../types.js';
 export type RenderedTile = {
     source: PdfImageSource;
     left: number;
@@ -10,6 +10,7 @@ export type Frame = {
     width: number;
     height: number;
     tiles: RenderedTile[];
+    colorAdjustments?: PdfGpuColorAdjustmentState;
 };
 export declare class PageRenderer {
     private _backend;
@@ -20,6 +21,10 @@ export declare class PageRenderer {
     private format;
     private pipeline;
     private sampler;
+    private colorUniformBuffer;
+    private colorBindGroup;
+    private lastColorAdjustments;
+    private readonly colorUniformData;
     private frameCanvas;
     private frameContext;
     private frameCount;
@@ -32,12 +37,10 @@ export declare class PageRenderer {
      */
     private canvasBoundToWebGpu;
     private disposed;
+    private recoveryGeneration;
     private loggedUndrawable;
-    /**
-     * Called after a lost GPU device has been replaced and the renderer can draw
-     * again. The viewer wires this to a repaint; nothing is drawn until then.
-     */
-    onDeviceRestored: (() => void) | null;
+    /** Reports loss and the outcome of device recovery to the viewer. */
+    onBackendChange: ((backend: PdfGpuBackend) => void) | null;
     /**
      * GPU textures uploaded from raster sources.
      *
@@ -117,6 +120,7 @@ export declare class PageRenderer {
      */
     private ensureVertexBuffer;
     private releaseVertexBuffer;
+    private clearColorResources;
     private render2d;
     private getFrameCanvas;
     private createPipeline;

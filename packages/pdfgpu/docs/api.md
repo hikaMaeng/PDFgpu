@@ -46,6 +46,7 @@
   - `options.fitMode`: `'none' | 'width' | 'height' | 'page'`
   - `options.scrollMode`: `'continuous' | 'page'`
   - `options.detailDpi`: detail tile 래스터 요청 DPI입니다. `144..384` 범위에서 48 DPI 단위로 정규화됩니다.
+  - `options.colorAdjustments`: 초기 페이지 표시 색상입니다. `invert` 기본값은 `false`, `brightness` 기본값은 `0`입니다.
   - 공개 메서드:
     - `load(source)`
     - `setZoom(value)`
@@ -57,6 +58,7 @@
     - `setFitMode(mode)`
     - `setScrollMode(mode)`
     - `setDetailDpi(dpi)`
+    - `setColorAdjustments({ invert?, brightness? })` — 지정한 항목만 갱신하고 WebGPU 페이지를 다시 합성합니다.
     - `fitWidth()`
     - `fitHeight()`
     - `fitPage()`
@@ -78,11 +80,25 @@
   - `queueDepth`: 실제 동시 래스터 요청 수. in-memory 공급자는 워커 풀 크기(메인 스레드 fallback은 1), 원격 공급자는 3(내장 Web API/WebSocket 공급자가 `queueDepth = 3`을 선언)
   - `renderQuality`: `'idle' | 'preview' | 'detail'`
   - `detailDpi`: 현재 detail tile 래스터 요청 DPI
+  - `colorAdjustments`: 컨트롤러가 제공하는 확정 설정값 `{ invert, brightness }`
   - `backend`: `'webgpu' | 'unsupported' | 'error'`
   - `loadPhase`: `'idle' | 'opening' | 'rendering' | 'ready' | 'error'`
   - `loadProgress`: 0..100 progress for opening and the initial viewport
   - `loadProgressDeterminate`: whether the download response exposed a usable total size
   - `loadedPages` / `loadPageCount`: initial preview pages completed and target count
+
+## 페이지 색상 조정
+
+`@pdfgpu/core`에서 `PdfGpuColorAdjustments` 타입을 가져올 수 있습니다.
+WebGPU는 preview와 detail 타일의 샘플링된 RGB에 반전, 밝기 오프셋 순서로 적용한 뒤
+각 채널을 `0..1`로 제한합니다. 밝기는 `-1..1`로 제한하며 유한하지 않은 입력은
+현재 값으로 유지합니다. `setColorAdjustments({ invert: false, brightness: 0 })`으로
+초기 색상으로 돌아갈 수 있습니다.
+
+효과의 지원 여부는 `backend === 'webgpu'`로 확인합니다. WebGPU 장치가 손실되면
+구독자에게 상태 변화를 알리고, 복구된 장치에 현재 설정을 적용합니다. 컨트롤러에서
+문서를 교체해도 설정이 유지됩니다. Canvas 2D 경로, 페이지 바깥 영역, DOM 오버레이와
+`captureRegion` 결과는 원래 색상을 사용합니다.
 
 ## 상호작용 API
 

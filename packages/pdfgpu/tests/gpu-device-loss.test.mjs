@@ -13,8 +13,9 @@ import { PageRenderer } from '../dist/render/renderer.js';
 function createLosableGpu(log) {
   const makeDevice = () => {
     let resolveLost;
+    const id = log.devices.length + 1;
     const device = {
-      id: log.devices.length + 1,
+      id,
       lost: new Promise((resolve) => { resolveLost = resolve; }),
       createTexture: () => {
         log.textures += 1;
@@ -23,25 +24,53 @@ function createLosableGpu(log) {
       createSampler: () => ({}),
       createShaderModule: () => ({}),
       createRenderPipeline: () => ({ getBindGroupLayout: () => ({}) }),
-      createBindGroup: () => ({}),
-      createBuffer: () => ({ destroy: () => {} }),
+      createBindGroup: (descriptor) => ({ id, buffer: descriptor.entries[0].resource.buffer }),
+      createBuffer: ({ usage }) => {
+        const isUniform = Boolean(usage & 0x40);
+        if (isUniform) log.uniformBuffers.push(id);
+        return {
+          id,
+          isUniform,
+          destroy: () => { if (isUniform) log.uniformsDestroyed.push(id); }
+        };
+      },
       createCommandEncoder: () => ({
         beginRenderPass: () => ({
-          setPipeline: () => {}, setBindGroup: () => {}, setVertexBuffer: () => {}, draw: () => {}, end: () => {}
+          setPipeline: () => {},
+          setBindGroup: (slot, group) => {
+            if (slot === 1) log.colorBindings.push([id, group.id, group.buffer.id]);
+          },
+          setVertexBuffer: () => {}, draw: () => {}, end: () => {}
         }),
         finish: () => ({})
       }),
-      queue: { writeBuffer: () => {}, copyExternalImageToTexture: () => {}, submit: () => { log.submit += 1; } },
-      destroy: () => { resolveLost({ reason: 'destroyed', message: 'destroyed by page' }); }
+      queue: {
+        writeBuffer: (buffer, _offset, data) => {
+          if (buffer.isUniform) log.colorWrites.push([id, buffer.id, ...data]);
+        },
+        copyExternalImageToTexture: () => {},
+        submit: () => { log.submit += 1; }
+      },
+      destroy: () => {
+        log.devicesDestroyed.push(id);
+        resolveLost({ reason: 'destroyed', message: 'destroyed by page' });
+      }
     };
     device.loseUnexpectedly = () => resolveLost({ reason: 'unknown', message: 'gpu process restarted' });
     log.devices.push(device);
+    if (id === log.immediatelyLostDevice) device.loseUnexpectedly();
     return device;
   };
   return {
     requestAdapter: async () => {
       log.adapters += 1;
-      return { requestDevice: async () => makeDevice() };
+      if (log.adapters === log.missingAdapterAt) return null;
+      return {
+        requestDevice: async () => {
+          await log.beforeRequestDevice?.();
+          return makeDevice();
+        }
+      };
     },
     getPreferredCanvasFormat: () => 'bgra8unorm'
   };
@@ -62,7 +91,10 @@ function boundCanvas(log) {
 }
 
 async function withGpu(run) {
-  const log = { adapters: 0, devices: [], configures: [], textures: 0, textureDestroy: 0, submit: 0, get2d: 0 };
+  const log = {
+    adapters: 0, devices: [], configures: [], textures: 0, textureDestroy: 0, submit: 0, get2d: 0,
+    uniformBuffers: [], uniformsDestroyed: [], colorBindings: [], colorWrites: [], devicesDestroyed: []
+  };
   const previous = globalThis.navigator;
   const info = console.info; const warn = console.warn; const error = console.error;
   Object.defineProperty(globalThis, 'navigator', { value: { gpu: createLosableGpu(log) }, configurable: true, writable: true });
@@ -89,10 +121,11 @@ describe('webgpu device loss', () => {
       const renderer = new PageRenderer();
       const canvas = boundCanvas(log);
       assert.equal(await renderer.init(canvas), 'webgpu');
-      let restored = 0;
-      renderer.onDeviceRestored = () => { restored += 1; };
+      const backends = [];
+      renderer.onBackendChange = (backend) => { backends.push(backend); };
 
-      renderer.render(canvas, frame(2));
+      const adjusted = { ...frame(2), colorAdjustments: { invert: true, brightness: 0.25 } };
+      renderer.render(canvas, adjusted);
       assert.equal(log.textures, 2);
       assert.equal(renderer.gpuTextureCount, 2);
 
@@ -101,14 +134,19 @@ describe('webgpu device loss', () => {
 
       assert.equal(log.adapters, 2, 'a new adapter was not requested');
       assert.deepEqual(log.configures, [1, 2], 'the canvas was not reconfigured with the new device');
-      assert.equal(restored, 1, 'the viewer was not asked to repaint');
+      assert.deepEqual(backends, ['error', 'webgpu']);
       assert.equal(renderer.state, 'webgpu');
       assert.equal(renderer.gpuTextureCount, 0, 'textures of the dead device were kept');
       assert.equal(log.textureDestroy, 0, 'destroy() was called on textures of a lost device');
 
-      renderer.render(canvas, frame(2));
+      renderer.render(canvas, adjusted);
       assert.equal(log.textures, 4, 'textures were not re-uploaded to the new device');
       assert.equal(log.get2d, 0, 'a 2d context was requested from a webgpu canvas');
+      assert.deepEqual(log.uniformBuffers, [1, 2]);
+      assert.deepEqual(log.colorWrites, [[1, 1, 1, 0.25], [2, 2, 1, 0.25]]);
+      assert.deepEqual(log.colorBindings, [[1, 1, 1], [2, 2, 2]]);
+      renderer.dispose();
+      assert.deepEqual(log.uniformsDestroyed, [2]);
     });
   });
 
@@ -117,14 +155,79 @@ describe('webgpu device loss', () => {
       const renderer = new PageRenderer();
       const canvas = boundCanvas(log);
       await renderer.init(canvas);
-      let restored = 0;
-      renderer.onDeviceRestored = () => { restored += 1; };
+      const backends = [];
+      renderer.onBackendChange = (backend) => { backends.push(backend); };
       renderer.dispose();
       await flush(); await flush();
       assert.equal(log.adapters, 1);
-      assert.equal(restored, 0);
+      assert.deepEqual(backends, []);
+      assert.deepEqual(log.uniformsDestroyed, [1]);
     });
   });
+
+  it('destroys a replacement device that arrives after dispose', async () => {
+    await withGpu(async (log) => {
+      const renderer = new PageRenderer();
+      const canvas = boundCanvas(log);
+      await renderer.init(canvas);
+      const backends = [];
+      renderer.onBackendChange = (backend) => { backends.push(backend); };
+      let finishRequest;
+      const pendingDevice = new Promise((resolve) => { finishRequest = resolve; });
+      log.beforeRequestDevice = () => pendingDevice;
+
+      log.devices[0].loseUnexpectedly();
+      await flush();
+      assert.deepEqual(backends, ['error']);
+      assert.equal(log.adapters, 2);
+      renderer.dispose();
+      finishRequest();
+      await flush();
+
+      assert.deepEqual(log.devicesDestroyed, [2]);
+      assert.deepEqual(log.configures, [1]);
+      assert.deepEqual(log.uniformBuffers, [1]);
+      assert.deepEqual(backends, ['error']);
+    });
+  });
+
+  it('reports a failed recovery after reporting the device loss', async () => {
+    await withGpu(async (log) => {
+      const renderer = new PageRenderer();
+      await renderer.init(boundCanvas(log));
+      const backends = [];
+      renderer.onBackendChange = (backend) => { backends.push(backend); };
+      log.beforeRequestDevice = () => { throw new Error('replacement unavailable'); };
+
+      log.devices[0].loseUnexpectedly();
+      await flush();
+      assert.deepEqual(backends, ['error']);
+      assert.equal(renderer.state, 'error');
+      assert.equal(renderer.reason, 'replacement unavailable');
+      renderer.dispose();
+    });
+  });
+
+  for (const missingAdapter of [false, true]) {
+    it(`does not report an immediately lost replacement as restored (next adapter ${missingAdapter ? 'missing' : 'available'})`, async () => {
+      await withGpu(async (log) => {
+        const renderer = new PageRenderer();
+        await renderer.init(boundCanvas(log));
+        const backends = [];
+        renderer.onBackendChange = (backend) => { backends.push(backend); };
+        log.immediatelyLostDevice = 2;
+        if (missingAdapter) log.missingAdapterAt = 3;
+
+        log.devices[0].loseUnexpectedly();
+        await flush();
+
+        assert.equal(log.adapters, 3);
+        assert.deepEqual(backends, missingAdapter ? ['error', 'error'] : ['error', 'error', 'webgpu']);
+        assert.equal(renderer.state, missingAdapter ? 'error' : 'webgpu');
+        renderer.dispose();
+      });
+    });
+  }
 
   it('skips the frame instead of throwing when a webgpu canvas has no usable device', async () => {
     await withGpu(async (log) => {

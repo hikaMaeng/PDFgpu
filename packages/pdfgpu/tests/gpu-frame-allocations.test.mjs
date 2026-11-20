@@ -36,13 +36,13 @@ function createCountingGpu(log) {
     createRenderPipeline: () => ({ getBindGroupLayout: () => ({}) }),
     createBindGroup: (desc) => {
       log.createBindGroup += 1;
-      log.bindGroupViews.push(desc.entries[1].resource);
+      if (desc.entries[1]) log.bindGroupViews.push(desc.entries[1].resource);
       return { kind: 'bind-group', id: log.createBindGroup };
     },
     createBuffer: (desc) => {
       log.createBuffer += 1;
       log.bufferSizes.push(desc.size);
-      return { kind: 'buffer', destroy: () => { log.bufferDestroy += 1; } };
+      return { usage: desc.usage, destroy: () => { log.bufferDestroy += 1; } };
     },
     createCommandEncoder: () => {
       log.createCommandEncoder += 1;
@@ -61,6 +61,10 @@ function createCountingGpu(log) {
     },
     queue: {
       writeBuffer: (buffer, offset, data, dataOffset, size) => {
+        if (buffer.usage & 0x40) {
+          log.colorWrites.push(Array.from(data));
+          return;
+        }
         log.writeBuffer += 1;
         // Keep a copy of exactly the bytes handed to the GPU.
         const view = new Float32Array(data, dataOffset, size / 4);
@@ -102,6 +106,7 @@ function newLog() {
     bufferDestroy: 0,
     createCommandEncoder: 0,
     writeBuffer: 0,
+    colorWrites: [],
     submit: 0,
     setVertexBuffer: 0,
     setBindGroup: [],
@@ -206,10 +211,30 @@ describe('webgpu per-frame allocations', () => {
       // Stronger than the ratios: these are built once for the 12 textures and
       // then reused for all 30 frames.
       assert.equal(log.textureViews, 12, 'a texture view was rebuilt');
-      assert.equal(log.createBindGroup, 12, 'a bind group was rebuilt');
-      assert.equal(log.createBuffer, 1, 'the vertex buffer was reallocated');
+      assert.equal(log.createBindGroup, 13, 'one color bind group and one per texture');
+      assert.equal(log.createBuffer, 2, 'one color buffer and one vertex buffer');
+      assert.deepEqual(log.colorWrites, [[0, 0]], 'unchanged colors did not require another upload');
       assert.equal(log.setVertexBuffer, 30, 'vertex buffer is bound once per frame');
       assert.equal(log.draws.length, 12 * 30, 'every tile is still drawn');
+    });
+  });
+
+  it('updates colors without rebuilding GPU resources', async () => {
+    await withCountingGpu(async (renderer, log) => {
+      const canvas = fakeCanvas();
+      const frame = tiledFrame(4);
+      const adjusted = { ...frame, colorAdjustments: Object.freeze({ invert: true, brightness: 0.25 }) };
+      renderer.render(canvas, frame);
+      renderer.render(canvas, adjusted);
+      renderer.render(canvas, adjusted);
+      renderer.render(canvas, { ...adjusted, colorAdjustments: { ...adjusted.colorAdjustments } });
+      renderer.render(canvas, frame);
+
+      assert.deepEqual(log.colorWrites, [[0, 0], [1, 0.25], [0, 0]]);
+      assert.equal(log.createTexture, 4);
+      assert.equal(log.createBindGroup, 5);
+      assert.equal(log.createBuffer, 2);
+      assert.equal(log.submit, 5);
     });
   });
 
