@@ -60,6 +60,10 @@ export interface PdfGpuColorAdjustments {
     invert?: boolean;
     /** Amount added to each normalized RGB channel after inversion. Range: -1 through 1. Defaults to 0. */
     brightness?: number;
+    /** Scale around mid-gray after brightness. Range: 0 through 2. Defaults to 1. */
+    contrast?: number;
+    /** Scale the distance from luminance after contrast. Range: 0 through 2. Defaults to 1. */
+    saturation?: number;
 }
 /** Resolved, immutable display color settings. */
 export type PdfGpuColorAdjustmentState = Readonly<Required<PdfGpuColorAdjustments>>;

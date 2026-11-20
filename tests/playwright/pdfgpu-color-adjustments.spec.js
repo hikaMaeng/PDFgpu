@@ -115,7 +115,7 @@ test('WebGPU adjusts preview and detail colors through the viewer API', async ({
     viewer.setColorAdjustments({ brightness: 0 });
     return viewer.getState().colorAdjustments;
   });
-  expect(settings).toEqual({ invert: true, brightness: 0 });
+  expect(settings).toEqual({ invert: true, brightness: 0, contrast: 1, saturation: 1 });
   await expectColors(page, [191, 127, 63]);
 
   const reloadedSettings = await page.evaluate(async () => {
@@ -123,17 +123,21 @@ test('WebGPU adjusts preview and detail colors through the viewer API', async ({
     await viewer.load(new ArrayBuffer(0));
     return viewer.getState().colorAdjustments;
   });
-  expect(reloadedSettings).toEqual({ invert: true, brightness: 0 });
+  expect(reloadedSettings).toEqual({ invert: true, brightness: 0, contrast: 1, saturation: 1 });
   await expectColors(page, [159, 95, 31]);
 
   await page.evaluate(() => window.colorTest.viewer.setColorAdjustments({ invert: false }));
   await expectColors(page, [96, 160, 224]);
+  await page.evaluate(() => window.colorTest.viewer.setColorAdjustments({ contrast: 1.5 }));
+  await expectColors(page, [80, 176, 255]);
+  await page.evaluate(() => window.colorTest.viewer.setColorAdjustments({ contrast: 0.5, saturation: 0 }));
+  await expectColors(page, [139, 139, 139]);
   const finalSettings = await page.evaluate(() => {
     const { viewer } = window.colorTest;
     viewer.dispose();
     return viewer.getState().colorAdjustments;
   });
-  expect(finalSettings).toEqual({ invert: false, brightness: 0 });
+  expect(finalSettings).toEqual({ invert: false, brightness: 0, contrast: 0.5, saturation: 0 });
 });
 
 test('Canvas 2D retains the color settings and displays original RGB', async ({ page }) => {
@@ -144,11 +148,11 @@ test('Canvas 2D retains the color settings and displays original RGB', async ({ 
 
   const settings = await page.evaluate(() => {
     const { viewer } = window.colorTest;
-    viewer.setColorAdjustments({ invert: true, brightness: 2 });
-    viewer.setColorAdjustments({ brightness: Infinity });
+    viewer.setColorAdjustments({ invert: true, brightness: 2, contrast: 4, saturation: -1 });
+    viewer.setColorAdjustments({ brightness: Infinity, contrast: NaN });
     return viewer.getState().colorAdjustments;
   });
-  expect(settings).toEqual({ invert: true, brightness: 1 });
+  expect(settings).toEqual({ invert: true, brightness: 1, contrast: 2, saturation: 0 });
   await expectColors(page, [32, 96, 224]);
 
   await page.evaluate(() => window.colorTest.showDetail());

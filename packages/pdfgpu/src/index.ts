@@ -34,6 +34,7 @@ import type {
 
 export * from './viewer/interaction.js';
 export * from './viewer/coordinates.js';
+export { DEFAULT_COLOR_ADJUSTMENTS, sameColorAdjustments, updateColorAdjustments } from './render/colorAdjustments.js';
 
 export {
   createPdfDocumentEngine,

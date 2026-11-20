@@ -89,11 +89,12 @@
 
 ## 페이지 색상 조정
 
-`@pdfgpu/core`에서 `PdfGpuColorAdjustments` 타입을 가져올 수 있습니다.
-WebGPU는 preview와 detail 타일의 샘플링된 RGB에 반전, 밝기 오프셋 순서로 적용한 뒤
-각 채널을 `0..1`로 제한합니다. 밝기는 `-1..1`로 제한하며 유한하지 않은 입력은
-현재 값으로 유지합니다. `setColorAdjustments({ invert: false, brightness: 0 })`으로
-초기 색상으로 돌아갈 수 있습니다.
+`@pdfgpu/core`의 `setColorAdjustments`는 preview와 detail 타일에 역상, 밝기, 대비,
+채도 순서로 적용합니다. 밝기는 RGB 오프셋 `-1..1`, 대비는 중간 회색을 중심으로 하는
+배율 `0..2`, 채도는 휘도를 중심으로 하는 배율 `0..2`입니다. 채도 `0`은 흑백입니다.
+각 단계의 채널은 `0..1`로 제한합니다. 부분 입력은 지정한 항목만 바꾸며 유한하지 않은
+값은 무시합니다. `setColorAdjustments(DEFAULT_COLOR_ADJUSTMENTS)`로 초기 색상을 복원합니다.
+`updateColorAdjustments`와 `sameColorAdjustments`는 동일한 정규화와 비교 규칙을 제공합니다.
 
 효과의 지원 여부는 `backend === 'webgpu'`로 확인합니다. WebGPU 장치가 손실되면
 구독자에게 상태 변화를 알리고, 복구된 장치에 현재 설정을 적용합니다. 컨트롤러에서

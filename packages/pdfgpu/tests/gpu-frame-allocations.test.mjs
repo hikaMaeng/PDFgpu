@@ -213,7 +213,7 @@ describe('webgpu per-frame allocations', () => {
       assert.equal(log.textureViews, 12, 'a texture view was rebuilt');
       assert.equal(log.createBindGroup, 13, 'one color bind group and one per texture');
       assert.equal(log.createBuffer, 2, 'one color buffer and one vertex buffer');
-      assert.deepEqual(log.colorWrites, [[0, 0]], 'unchanged colors did not require another upload');
+      assert.deepEqual(log.colorWrites, [[0, 0, 1, 1]], 'unchanged colors did not require another upload');
       assert.equal(log.setVertexBuffer, 30, 'vertex buffer is bound once per frame');
       assert.equal(log.draws.length, 12 * 30, 'every tile is still drawn');
     });
@@ -223,14 +223,14 @@ describe('webgpu per-frame allocations', () => {
     await withCountingGpu(async (renderer, log) => {
       const canvas = fakeCanvas();
       const frame = tiledFrame(4);
-      const adjusted = { ...frame, colorAdjustments: Object.freeze({ invert: true, brightness: 0.25 }) };
+      const adjusted = { ...frame, colorAdjustments: Object.freeze({ invert: true, brightness: 0.25, contrast: 1.5, saturation: 0 }) };
       renderer.render(canvas, frame);
       renderer.render(canvas, adjusted);
       renderer.render(canvas, adjusted);
       renderer.render(canvas, { ...adjusted, colorAdjustments: { ...adjusted.colorAdjustments } });
       renderer.render(canvas, frame);
 
-      assert.deepEqual(log.colorWrites, [[0, 0], [1, 0.25], [0, 0]]);
+      assert.deepEqual(log.colorWrites, [[0, 0, 1, 1], [1, 0.25, 1.5, 0], [0, 0, 1, 1]]);
       assert.equal(log.createTexture, 4);
       assert.equal(log.createBindGroup, 5);
       assert.equal(log.createBuffer, 2);

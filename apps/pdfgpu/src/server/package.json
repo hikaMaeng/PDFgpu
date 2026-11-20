@@ -1,6 +1,6 @@
 {
   "name": "@pdfgpu/app-server",
-  "version": "0.1.11",
+  "version": "0.1.12",
   "private": true,
   "scripts": {
     "build": "tsc -p tsconfig.server.json",

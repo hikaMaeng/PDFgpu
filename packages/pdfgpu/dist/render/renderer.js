@@ -1,4 +1,4 @@
-import { DEFAULT_COLOR_ADJUSTMENTS } from './colorAdjustments.js';
+import { DEFAULT_COLOR_ADJUSTMENTS, sameColorAdjustments } from './colorAdjustments.js';
 const GPU_TEXTURE_USAGE_COPY_DST = 0x02;
 const GPU_TEXTURE_USAGE_TEXTURE_BINDING = 0x04;
 const GPU_TEXTURE_USAGE_RENDER_ATTACHMENT = 0x10;
@@ -58,7 +58,7 @@ export class PageRenderer {
         this.colorBindGroup = null;
         this.lastColorAdjustments = null;
         // Matches the two f32 fields in the fragment shader's ColorAdjustments struct.
-        this.colorUniformData = new Float32Array(2);
+        this.colorUniformData = new Float32Array(4);
         this.frameCanvas = null;
         this.frameContext = null;
         this.frameCount = 0;
@@ -333,9 +333,11 @@ export class PageRenderer {
             : null;
         if (vertexBuffer) {
             const colors = frame.colorAdjustments ?? DEFAULT_COLOR_ADJUSTMENTS;
-            if (colors.invert !== this.lastColorAdjustments?.invert || colors.brightness !== this.lastColorAdjustments?.brightness) {
+            if (!this.lastColorAdjustments || !sameColorAdjustments(colors, this.lastColorAdjustments)) {
                 this.colorUniformData[0] = colors.invert ? 1 : 0;
                 this.colorUniformData[1] = colors.brightness;
+                this.colorUniformData[2] = colors.contrast;
+                this.colorUniformData[3] = colors.saturation;
                 this.device.queue.writeBuffer(this.colorUniformBuffer, 0, this.colorUniformData);
                 this.lastColorAdjustments = colors;
             }
@@ -514,13 +516,18 @@ export class PageRenderer {
         struct ColorAdjustments {
           invert: f32,
           brightness: f32,
+          contrast: f32,
+          saturation: f32,
         }
 
         @group(1) @binding(0) var<uniform> colorAdjustments: ColorAdjustments;
 
         fn adjustColor(rgb: vec3f) -> vec3f {
           let inverted = select(rgb, vec3f(1.0) - rgb, colorAdjustments.invert != 0.0);
-          return clamp(inverted + vec3f(colorAdjustments.brightness), vec3f(0.0), vec3f(1.0));
+          let brightened = clamp(inverted + vec3f(colorAdjustments.brightness), vec3f(0.0), vec3f(1.0));
+          let contrasted = clamp((brightened - vec3f(0.5)) * colorAdjustments.contrast + vec3f(0.5), vec3f(0.0), vec3f(1.0));
+          let luminance = dot(contrasted, vec3f(0.2126, 0.7152, 0.0722));
+          return clamp(mix(vec3f(luminance), contrasted, colorAdjustments.saturation), vec3f(0.0), vec3f(1.0));
         }
 
         @fragment

@@ -124,7 +124,7 @@ describe('webgpu device loss', () => {
       const backends = [];
       renderer.onBackendChange = (backend) => { backends.push(backend); };
 
-      const adjusted = { ...frame(2), colorAdjustments: { invert: true, brightness: 0.25 } };
+      const adjusted = { ...frame(2), colorAdjustments: { invert: true, brightness: 0.25, contrast: 1.5, saturation: 0 } };
       renderer.render(canvas, adjusted);
       assert.equal(log.textures, 2);
       assert.equal(renderer.gpuTextureCount, 2);
@@ -143,7 +143,7 @@ describe('webgpu device loss', () => {
       assert.equal(log.textures, 4, 'textures were not re-uploaded to the new device');
       assert.equal(log.get2d, 0, 'a 2d context was requested from a webgpu canvas');
       assert.deepEqual(log.uniformBuffers, [1, 2]);
-      assert.deepEqual(log.colorWrites, [[1, 1, 1, 0.25], [2, 2, 1, 0.25]]);
+      assert.deepEqual(log.colorWrites, [[1, 1, 1, 0.25, 1.5, 0], [2, 2, 1, 0.25, 1.5, 0]]);
       assert.deepEqual(log.colorBindings, [[1, 1, 1], [2, 2, 2]]);
       renderer.dispose();
       assert.deepEqual(log.uniformsDestroyed, [2]);
